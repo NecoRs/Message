@@ -54,7 +54,11 @@
     msg: '<path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l.9-4.4A8 8 0 1 1 20 12Z"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>',
+    reply: '<path d="M10 8 5 12l5 4"/><path d="M5 12h9a5 5 0 0 1 5 5v1"/>',
+    more: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   };
+  const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
   const svg = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${SVG[name]}</svg>`;
 
   // Strip control and bidi-override characters (they can spoof how a name reads).
@@ -157,6 +161,9 @@
     active: null,
     net: 'idle',
     theme: store.get('theme', 'auto'),
+    sound: store.get('sound', true) !== false,
+    reply: null,         // { id, text, me } quoted in the next message
+    query: '',
     presence: new Map(), // id -> online | connecting | offline | unreachable
     typing: new Map(),   // id -> timer
   };
@@ -442,6 +449,7 @@
       case 'ack': if (typeof d.id === 'string') markMine(id, [d.id], 'delivered'); break;
       case 'read': if (Array.isArray(d.ids)) markMine(id, d.ids.slice(0, 2000), 'read'); break;
       case 'typing': setTyping(id, !!d.on); break;
+      case 'react': onReact(id, d); break;
       default: break; // ping / unknown
     }
   }
@@ -458,6 +466,11 @@
     const c = ensureContact(id);
     const ts = Number.isFinite(d.ts) && d.ts > 0 ? Math.min(d.ts, Date.now()) : Date.now();
     const m = { id: d.id, me: false, text, ts, seen: false, rr: false };
+    const re = d.re;
+    if (re && typeof re === 'object' && typeof re.id === 'string' && re.id.length <= 40 && typeof re.text === 'string') {
+      // "by" is from the sender's side: 's' = they quoted themselves, 'r' = they quoted us
+      m.re = { id: re.id, text: cleanText(re.text).slice(0, 160), me: re.by === 'r' };
+    }
     list.push(m);
     trim(list);
     saveMsgs(id);
@@ -472,6 +485,7 @@
       c.unread = (c.unread || 0) + 1;
       notify(c, text);
     }
+    chime('in');
     saveContacts();
     if (S.active === id) appendMessage(m);
     renderList();
@@ -496,10 +510,50 @@
     }
   }
 
+  function wireMsg(m) {
+    const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
+    if (m.re) o.re = { id: m.re.id, text: m.re.text, by: m.re.me ? 's' : 'r' };
+    return o;
+  }
+
   function flushOutbox(id) {
+    let changed = false;
     for (const m of msgsOf(id)) {
-      if (m.me && m.st === 'pending' && !sendTo(id, { t: 'msg', id: m.id, text: m.text, ts: m.ts })) break;
+      if (m.me && m.st === 'pending' && !sendTo(id, wireMsg(m))) break;
+      if (m.rxp && sendTo(id, { t: 'react', id: m.id, e: (m.rx && m.rx.me) || '' })) { delete m.rxp; changed = true; }
     }
+    if (changed) saveMsgs(id);
+  }
+
+  function findMsg(id, mid) {
+    return msgsOf(id).find((m) => m.id === mid) || null;
+  }
+
+  function onReact(id, d) {
+    if (typeof d.id !== 'string') return;
+    const m = findMsg(id, d.id);
+    if (!m) return;
+    const e = REACTS.includes(d.e) ? d.e : '';
+    m.rx = m.rx || {};
+    if (e) m.rx.them = e; else delete m.rx.them;
+    saveMsgs(id);
+    if (S.active === id) refreshRow(m, true);
+    if (e && m.me && !isViewing(id)) {
+      const c = S.contacts[id];
+      if (c && document.visibilityState === 'visible') toast(`تفاعل ${e} على رسالتك`, { title: nameOf(c), onClick: () => openChat(id) });
+    }
+  }
+
+  function react(m, e) {
+    const id = S.active;
+    if (!id) return;
+    m.rx = m.rx || {};
+    const next = m.rx.me === e ? '' : e;
+    if (next) m.rx.me = next; else delete m.rx.me;
+    m.rxp = true;
+    if (sendTo(id, { t: 'react', id: m.id, e: next })) delete m.rxp;
+    saveMsgs(id);
+    refreshRow(m, true);
   }
 
   function flushReceipts(id) {
@@ -517,11 +571,12 @@
     if (list.length > KEEP) list.splice(0, list.length - KEEP);
   }
 
-  function sendMessage(text) {
+  function sendMessage(text, re) {
     const id = S.active;
     if (!id) return;
     const c = ensureContact(id);
     const m = { id: msgId(), me: true, text, ts: Date.now(), st: 'pending' };
+    if (re) m.re = re;
     const list = msgsOf(id);
     list.push(m);
     trim(list);
@@ -531,9 +586,10 @@
     saveContacts();
     appendMessage(m, true);
     renderList();
-    if (isOpen(id)) sendTo(id, { t: 'msg', id: m.id, text, ts: m.ts });
+    if (isOpen(id)) sendTo(id, wireMsg(m));
     else dial(id);
     renderBanner();
+    chime('out');
   }
 
   function setTyping(id, on) {
@@ -630,8 +686,15 @@
 
   function drawList() {
     const ul = $('#list');
-    const items = Object.values(S.contacts).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-    $('#list-empty').hidden = items.length > 0;
+    const all = Object.values(S.contacts);
+    const q = S.query;
+    const items = all
+      .filter((c) => !q || nameOf(c).toLowerCase().includes(q) || c.id.toLowerCase().includes(q) ||
+        (c.last && c.last.text.toLowerCase().includes(q)))
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    $('#list-empty').hidden = all.length > 0;
+    $('#search-box').hidden = !all.length && !q;
+    $('#search-empty').hidden = !(all.length && !items.length);
     ul.hidden = !items.length;
 
     const keep = new Set();
@@ -704,6 +767,10 @@
   function updateTitle() {
     const n = Object.values(S.contacts).reduce((s, c) => s + (c.unread || 0), 0);
     document.title = n ? `(${n}) رواق` : 'رواق';
+    try {
+      if (n && navigator.setAppBadge) navigator.setAppBadge(n).catch(() => {});
+      else if (!n && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    } catch (_) { /* ignore */ }
   }
 
   // ---------------------------------------------------------------- chat
@@ -732,8 +799,10 @@
     input.value = S.drafts[id] || '';
     autosize();
     updateSend();
+    cancelReply();
     renderChatHead(true);
-    renderMessages();
+    const firstUnread = msgsOf(id).find((m) => !m.me && !m.seen);
+    renderMessages(firstUnread && firstUnread.id);
     $('#typing').classList.toggle('show', S.typing.has(id));
     renderBanner();
     markSeen(id);
@@ -747,6 +816,8 @@
     if (!id) return;
     S.drafts[id] = input.value;
     stopTyping(id);
+    cancelReply();
+    closeCtx();
   }
 
   function closeChat(fromPop) {
@@ -826,20 +897,37 @@
     wrap.classList.toggle('show', !!text);
   }
 
-  function renderMessages() {
+  function renderMessages(unreadId, keepScroll) {
+    const top = scroller.scrollTop;
     box.textContent = '';
     lastShown = null;
     const list = msgsOf(S.active);
+    let sep = null;
     if (!list.length) {
       box.appendChild(introNode());
     } else {
       const frag = document.createDocumentFragment();
-      for (const m of list) { nodesFor(m, lastShown).forEach((n) => frag.appendChild(n)); lastShown = m; }
+      for (const m of list) {
+        const nodes = nodesFor(m, lastShown);
+        if (unreadId && m.id === unreadId) {
+          sep = el('div', 'unread-sep');
+          sep.appendChild(el('span', null, 'رسائل جديدة'));
+          nodes.splice(nodes.length - 1, 0, sep); // after the day label, before the message
+        }
+        nodes.forEach((n) => frag.appendChild(n));
+        lastShown = m;
+      }
       box.appendChild(frag);
     }
     hideJump();
-    stick = true;
-    requestAnimationFrame(() => scrollToBottom(false));
+    if (keepScroll) { scroller.scrollTop = top; return; }
+    stick = !sep;
+    requestAnimationFrame(() => {
+      if (sep) {
+        scroller.scrollTop = Math.max(0, sep.offsetTop - scroller.clientHeight * 0.3);
+        stick = nearBottom();
+      } else scrollToBottom(false);
+    });
   }
 
   function introNode() {
@@ -884,6 +972,17 @@
     if (isJumbo(m.text)) row.classList.add('jumbo');
     const b = el('div', 'bubble');
     if (!isRtl(m.text)) b.classList.add('ltr');
+    if (m.re) {
+      const q = el('button', 'quote');
+      q.type = 'button';
+      q.dataset.ref = m.re.id;
+      q.appendChild(el('b', null, m.re.me ? 'أنت' : nameOf(S.contacts[S.active])));
+      const qt = el('span', null, m.re.text.replace(/\s+/g, ' '));
+      qt.dir = 'auto';
+      q.appendChild(qt);
+      b.appendChild(q);
+      row.classList.remove('jumbo');
+    }
     const p = el('p', 'text');
     p.dir = 'auto';
     linkify(p, m.text);
@@ -898,8 +997,37 @@
       meta.appendChild(tk);
     }
     b.append(p, meta);
-    row.appendChild(b);
+    const rx = reactionsOf(m);
+    if (rx.length) {
+      const pill = el('span', 'rx');
+      pill.textContent = rx.join(' ');
+      pill.setAttribute('aria-label', 'تفاعلات: ' + rx.join(' '));
+      b.appendChild(pill);
+      row.classList.add('has-rx');
+    }
+    const tools = el('div', 'msg-tools');
+    tools.innerHTML = `<button type="button" data-tool="reply" aria-label="رد">${svg('reply')}</button>` +
+      `<button type="button" data-tool="more" aria-label="خيارات">${svg('more')}</button>`;
+    const swipe = el('span', 'swipe-hint');
+    swipe.innerHTML = svg('reply');
+    row.append(b, tools, swipe);
     return row;
+  }
+
+  function reactionsOf(m) {
+    if (!m.rx) return [];
+    const { me, them } = m.rx;
+    if (me && them && me === them) return [me + ' 2'];
+    return [them, me].filter(Boolean);
+  }
+
+  function refreshRow(m, pop) {
+    const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
+    if (!row) return;
+    const fresh = bubbleFor(m, row.classList.contains('cont'));
+    row.replaceWith(fresh);
+    const pill = $('.rx', fresh);
+    if (pop && pill) pill.classList.add('pop');
   }
 
   const TICK = {
@@ -1012,8 +1140,212 @@
     sendBtn.classList.remove('fly');
     void sendBtn.offsetWidth;
     sendBtn.classList.add('fly');
-    sendMessage(text);
+    const re = S.reply;
+    cancelReply();
+    sendMessage(text, re);
   }
+
+  // ---------------------------------------------------------------- replies
+
+  function startReply(m) {
+    if (!S.active) return;
+    S.reply = { id: m.id, text: m.text.slice(0, 160), me: m.me };
+    $('#reply-name').textContent = m.me ? 'الرد على رسالتك' : `الرد على ${nameOf(S.contacts[S.active])}`;
+    $('#reply-text').textContent = m.text.replace(/\s+/g, ' ');
+    $('#reply-wrap').classList.add('show');
+    input.focus({ preventScroll: true });
+    if (stick) setTimeout(() => scrollToBottom(true), 60);
+  }
+  function cancelReply() {
+    S.reply = null;
+    $('#reply-wrap').classList.remove('show');
+  }
+  $('#reply-x').addEventListener('click', () => { cancelReply(); input.focus({ preventScroll: true }); });
+  $('#reply-x').addEventListener('pointerdown', (e) => { if (document.activeElement === input) e.preventDefault(); });
+
+  function jumpTo(mid) {
+    const row = box.querySelector(`.msg[data-id="${CSS.escape(mid)}"]`);
+    if (!row) { toast('الرسالة الأصلية غير موجودة', { icon: 'alert' }); return; }
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.remove('flash');
+    void row.offsetWidth;
+    row.classList.add('flash');
+    row.addEventListener('animationend', () => row.classList.remove('flash'), { once: true });
+  }
+
+  function deleteMsg(m) {
+    const id = S.active;
+    const list = msgsOf(id);
+    const i = list.indexOf(m);
+    if (i < 0) return;
+    list.splice(i, 1);
+    saveMsgs(id);
+    const c = S.contacts[id];
+    const last = list[list.length - 1];
+    if (c) {
+      c.last = last ? { text: last.text.slice(0, 140), me: last.me, ts: last.ts } : null;
+      saveContacts();
+    }
+    if (S.reply && S.reply.id === m.id) cancelReply();
+    const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
+    const rerender = () => renderMessages(null, true);
+    if (row) {
+      row.classList.add('leave');
+      setTimeout(rerender, 280);
+    } else rerender();
+    renderList();
+  }
+
+  // ---------------------------------------------------------------- message menu
+
+  const ctx = $('#ctx');
+  const ctxCard = $('#ctx-card');
+  let ctxMsg = null;
+  let heldRow = null;
+
+  function openCtx(m, row) {
+    if (!S.active) return;
+    closeCtx(true);
+    ctxMsg = m;
+    heldRow = row;
+    const rr = $('#ctx-reacts');
+    rr.textContent = '';
+    REACTS.forEach((e, k) => {
+      const b = el('button', 'react' + (m.rx && m.rx.me === e ? ' on' : ''), e);
+      b.type = 'button';
+      b.style.setProperty('--k', k);
+      b.setAttribute('aria-label', 'تفاعل ' + e);
+      b.addEventListener('click', () => { const msg = ctxMsg; closeCtx(); if (msg) react(msg, e); });
+      rr.appendChild(b);
+    });
+    ctx.hidden = false;
+    row.classList.add('held');
+
+    const bubble = $('.bubble', row).getBoundingClientRect();
+    const cw = ctxCard.offsetWidth;
+    const ch = ctxCard.offsetHeight;
+    const vw = document.documentElement.clientWidth;
+    const vh = $('#app').clientHeight;
+    let top = bubble.bottom + 8;
+    let originY = 'top';
+    if (top + ch > vh - 12) { top = bubble.top - ch - 8; originY = 'bottom'; }
+    if (top < 12) { top = Math.min(vh - ch - 12, Math.max(12, bubble.top)); originY = 'center'; }
+    let left = m.me ? bubble.left : bubble.right - cw;
+    left = Math.max(12, Math.min(vw - cw - 12, left));
+    ctxCard.style.top = top + 'px';
+    ctxCard.style.left = left + 'px';
+    ctxCard.style.transformOrigin = `${m.me ? 'left' : 'right'} ${originY}`;
+    void ctx.offsetWidth;
+    ctx.classList.add('open');
+    if (isTouch && navigator.vibrate) { try { navigator.vibrate(8); } catch (_) { /* ignore */ } }
+    if (!isTouch) { const f = $('.react', ctxCard); if (f) f.focus({ preventScroll: true }); }
+  }
+
+  function closeCtx(instant) {
+    if (ctx.hidden) return;
+    ctx.classList.remove('open');
+    if (heldRow) heldRow.classList.remove('held');
+    heldRow = null;
+    ctxMsg = null;
+    if (instant) ctx.hidden = true;
+    else setTimeout(() => { if (!ctx.classList.contains('open')) ctx.hidden = true; }, 260);
+  }
+
+  ctx.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-ctx-close]')) { closeCtx(); return; }
+    const act = e.target.closest('[data-act]');
+    if (!act || !ctxMsg) return;
+    const m = ctxMsg;
+    closeCtx();
+    if (act.dataset.act === 'reply') startReply(m);
+    else if (act.dataset.act === 'copy') copyText(m.text, 'تم نسخ الرسالة');
+    else if (act.dataset.act === 'delete') {
+      const ok = await confirmBox('حذف الرسالة؟', 'بتنحذف من جهازك فقط، وتبقى عند الطرف الثاني.', 'حذف');
+      if (ok) deleteMsg(m);
+    }
+  });
+  scroller.addEventListener('scroll', () => closeCtx(), { passive: true });
+
+  const msgOfRow = (row) => (row && S.active ? findMsg(S.active, row.dataset.id) : null);
+
+  let suppressClick = false;
+  box.addEventListener('click', (e) => {
+    if (suppressClick) {
+      // the tap that ends a long-press must not also follow a link or quote
+      suppressClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const q = e.target.closest('.quote');
+    if (q) { jumpTo(q.dataset.ref); return; }
+    const tool = e.target.closest('[data-tool]');
+    if (!tool) return;
+    const row = tool.closest('.msg');
+    const m = msgOfRow(row);
+    if (!m) return;
+    if (tool.dataset.tool === 'reply') startReply(m);
+    else openCtx(m, row);
+  });
+
+  // touch: long-press opens the menu, horizontal swipe replies
+  let gesture = null;
+  box.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    const row = e.target.closest('.msg');
+    if (!row || e.target.closest('[data-tool]')) return;
+    suppressClick = false;
+    const g = { row, x: e.clientX, y: e.clientY, dx: 0, swiping: false, id: e.pointerId };
+    g.timer = setTimeout(() => {
+      const m = msgOfRow(row);
+      gesture = null;
+      if (!m) return;
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 800);
+      openCtx(m, row);
+    }, 430);
+    gesture = g;
+  });
+  box.addEventListener('pointermove', (e) => {
+    const g = gesture;
+    if (!g || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (!g.swiping) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(g.timer);
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        g.swiping = true;
+        g.row.classList.add('swiping');
+      } else if (Math.abs(dy) > 10) { gesture = null; return; }
+    }
+    if (g.swiping) {
+      const d = Math.sign(dx) * Math.min(84, Math.abs(dx) * 0.7);
+      g.dx = d;
+      g.row.style.transform = `translateX(${d}px)`;
+      g.row.style.setProperty('--sw', Math.min(1, Math.abs(d) / 56).toFixed(2));
+      if (!g.armed && Math.abs(d) >= 56) {
+        g.armed = true;
+        if (navigator.vibrate) { try { navigator.vibrate(6); } catch (_) { /* ignore */ } }
+      }
+    }
+  });
+  function endGesture() {
+    const g = gesture;
+    gesture = null;
+    if (!g) return;
+    clearTimeout(g.timer);
+    if (!g.swiping) return;
+    const row = g.row;
+    row.classList.remove('swiping');
+    row.style.transform = '';
+    row.style.removeProperty('--sw');
+    if (Math.abs(g.dx) >= 56) {
+      const m = msgOfRow(row);
+      if (m) startReply(m);
+    }
+  }
+  box.addEventListener('pointerup', endGesture);
+  box.addEventListener('pointercancel', endGesture);
 
   input.addEventListener('input', () => { autosize(); updateSend(); typingPing(); });
   input.addEventListener('keydown', (e) => {
@@ -1062,11 +1394,92 @@
       return;
     }
     if ('Notification' in window && Notification.permission === 'granted') {
+      const opts = { body: text.slice(0, 160), tag: 'rawaq-' + c.id, lang: 'ar', dir: 'rtl', icon: 'icons/icon-192.png', data: { id: c.id } };
+      if (swReg && swReg.showNotification) {
+        swReg.showNotification(nameOf(c), Object.assign({ renotify: true }, opts)).catch(() => {});
+        return;
+      }
       try {
-        const n = new Notification(nameOf(c), { body: text.slice(0, 160), tag: 'rawaq-' + c.id, lang: 'ar', dir: 'rtl' });
+        const n = new Notification(nameOf(c), opts);
         n.onclick = () => { window.focus(); openChat(c.id); n.close(); };
       } catch (_) { /* some mobile browsers only allow service-worker notifications */ }
     }
+  }
+
+  // ---------------------------------------------------------------- sound
+
+  let actx = null;
+  function unlockAudio() {
+    if (!S.sound) return;
+    try {
+      if (!actx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        actx = new AC();
+      }
+      if (actx.state === 'suspended') actx.resume();
+    } catch (_) { /* ignore */ }
+  }
+  function chime(kind) {
+    if (!S.sound || !actx || actx.state !== 'running') return;
+    const t = actx.currentTime;
+    const notes = kind === 'in' ? [[880, 0, 0.08], [1318.5, 0.09, 0.07]] : [[740, 0, 0.035]];
+    for (const [f, d, v] of notes) {
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.exponentialRampToValueAtTime(v, t + d + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.3);
+      o.connect(g).connect(actx.destination);
+      o.start(t + d);
+      o.stop(t + d + 0.32);
+    }
+  }
+  document.addEventListener('pointerdown', unlockAudio, { capture: true });
+  document.addEventListener('keydown', unlockAudio, { capture: true });
+
+  function renderSound() {
+    $('#btn-sound').setAttribute('aria-checked', String(S.sound));
+  }
+
+  // ---------------------------------------------------------------- QR
+
+  function renderQr() {
+    const holder = $('#qr');
+    holder.textContent = '';
+    if (!window.qrcode || !S.me) return;
+    const q = window.qrcode(0, 'M');
+    q.addData(inviteLink());
+    q.make();
+    const n = q.getModuleCount();
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
+    holder.innerHTML = `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges" aria-hidden="true"><path d="${d}"/></svg>`;
+  }
+
+  // ---------------------------------------------------------------- install (PWA)
+
+  let swReg = null;
+  let installEvt = null;
+  const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function renderInstall() {
+    const b = $('#btn-install');
+    if (isStandalone()) { b.hidden = true; return; }
+    if (installEvt) { b.hidden = false; $('#install-state').textContent = ''; }
+    else if (isIOS) { b.hidden = false; $('#install-state').textContent = 'من زر المشاركة'; }
+    else b.hidden = true;
+  }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; renderInstall(); });
+  window.addEventListener('appinstalled', () => { installEvt = null; renderInstall(); toast('تم تثبيت رواق', { icon: 'check' }); });
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
+    navigator.serviceWorker.register('sw.js').then((r) => { swReg = r; }).catch(() => {});
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const d = e.data || {};
+      if (d.t === 'open' && typeof d.id === 'string' && S.contacts[d.id] && owner) openChat(d.id);
+    });
   }
 
   function shake(inputEl, errEl, msg) {
@@ -1139,7 +1552,16 @@
     if (e.target.closest('[data-close]')) closeModal();
   });
   document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && currentView() === 'main') {
+      e.preventDefault();
+      if (S.active && mqMobile.matches) closeChat();
+      const qi = $('#q');
+      if (!$('#search-box').hidden) qi.focus();
+      return;
+    }
     if (e.key !== 'Escape') return;
+    if (!ctx.hidden) { closeCtx(); return; }
+    if (S.reply && document.activeElement === input) { cancelReply(); return; }
     if (openM) closeModal();
     else if (S.active && mqMobile.matches) closeChat();
   });
@@ -1206,14 +1628,24 @@
   // ---------------------------------------------------------------- invite links
 
   let intent = null;
+  let openIntent = null;
   function readIntent() {
-    const m = /(?:^|[#&?])to=([A-Za-z0-9-]{4,40})/.exec(location.hash + '&' + location.search);
-    if (!m) return;
-    intent = normalizeId(m[1]);
+    const all = location.hash + '&' + location.search;
+    const m = /(?:^|[#&?])to=([A-Za-z0-9-]{4,40})/.exec(all);
+    const o = /(?:^|[#&?])open=([A-Za-z0-9]{4,12})/.exec(all);
+    if (!m && !o) return;
+    if (m) intent = normalizeId(m[1]);
+    if (o) openIntent = normalizeId(o[1]);
     history.replaceState(history.state, '', location.pathname);
   }
   function consumeIntent() {
-    if (!intent || !S.me || !owner || currentView() !== 'main') return;
+    if (!S.me || !owner || currentView() !== 'main') return;
+    if (openIntent) {
+      const oid = openIntent;
+      openIntent = null;
+      if (S.contacts[oid]) openChat(oid);
+    }
+    if (!intent) return;
     const id = intent;
     intent = null;
     const err = startChatWith(id);
@@ -1258,6 +1690,7 @@
       if (!S.me) return;
       if (e.target.closest('[data-copy-id]')) copyText(S.me.id, 'تم نسخ معرّفك');
       else if (e.target.closest('[data-share]')) shareMe();
+      else if (e.target.closest('[data-qr]')) { renderQr(); openModal('m-qr'); }
     });
 
     // sidebar
@@ -1265,6 +1698,8 @@
     $('#btn-me').addEventListener('click', () => {
       $('#in-rename').value = S.me.name;
       renderNotify();
+      renderSound();
+      renderInstall();
       openModal('m-me');
     });
     $('#net').addEventListener('click', () => {
@@ -1319,6 +1754,50 @@
       closeModal();
     });
     $$('[data-theme-opt]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeOpt)));
+    $('#btn-sound').addEventListener('click', () => {
+      S.sound = !S.sound;
+      store.set('sound', S.sound);
+      renderSound();
+      if (S.sound) { unlockAudio(); setTimeout(() => chime('in'), 60); }
+    });
+    $('#btn-install').addEventListener('click', async () => {
+      if (installEvt) {
+        const evt = installEvt;
+        installEvt = null;
+        try { evt.prompt(); await evt.userChoice; } catch (_) { /* ignore */ }
+        renderInstall();
+      } else if (isIOS) {
+        toast('اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»', { icon: 'alert', ms: 5000 });
+      }
+    });
+
+    // search
+    const q = $('#q');
+    q.addEventListener('input', () => {
+      S.query = q.value.trim().toLowerCase();
+      $('#q-x').hidden = !q.value;
+      drawList();
+    });
+    $('#q-x').addEventListener('click', () => {
+      q.value = '';
+      S.query = '';
+      $('#q-x').hidden = true;
+      drawList();
+      q.focus({ preventScroll: true });
+    });
+
+    // no browser context menu: messages get Rawaq's own menu instead
+    document.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('input, textarea')) return;
+      e.preventDefault();
+      if (!ctx.hidden) return; // Android also fires this after our own long-press
+      const row = e.target.closest('.msg');
+      const m = row && box.contains(row) ? msgOfRow(row) : null;
+      if (m) openCtx(m, row);
+    });
+    document.addEventListener('dragstart', (e) => {
+      if (!e.target.closest || !e.target.closest('input, textarea')) e.preventDefault();
+    });
     $('#btn-notify').addEventListener('click', async () => {
       if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
       if (Notification.permission === 'default') {

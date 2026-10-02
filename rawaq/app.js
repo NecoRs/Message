@@ -1783,15 +1783,25 @@
 
   // touch: long-press opens the menu, horizontal swipe replies
   let gesture = null;
+  // while a finger rests on a bubble it sinks in slightly; it springs back on release
+  let pressedRow = null;
+  function unpress() {
+    if (pressedRow) pressedRow.classList.remove('pressing');
+    pressedRow = null;
+  }
   box.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
     const row = e.target.closest('.msg');
     if (!row || e.target.closest('[data-tool]')) return;
     suppressClick = false;
+    unpress();
+    pressedRow = row;
+    row.classList.add('pressing');
     const g = { row, x: e.clientX, y: e.clientY, dx: 0, swiping: false, id: e.pointerId };
     g.timer = setTimeout(() => {
       const m = msgOfRow(row);
       gesture = null;
+      unpress();
       if (!m) return;
       suppressClick = true;
       setTimeout(() => { suppressClick = false; }, 800);
@@ -1805,7 +1815,7 @@
     const dx = e.clientX - g.x;
     const dy = e.clientY - g.y;
     if (!g.swiping) {
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(g.timer);
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { clearTimeout(g.timer); unpress(); }
       if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
         g.swiping = true;
         g.row.classList.add('swiping');
@@ -1823,6 +1833,7 @@
     }
   });
   function endGesture() {
+    unpress();
     const g = gesture;
     gesture = null;
     if (!g) return;
@@ -1839,6 +1850,10 @@
   }
   box.addEventListener('pointerup', endGesture);
   box.addEventListener('pointercancel', endGesture);
+  // the finger may lift outside the message list
+  window.addEventListener('pointerup', unpress);
+  window.addEventListener('pointercancel', unpress);
+  scroller.addEventListener('scroll', unpress, { passive: true });
 
   input.addEventListener('input', () => { autosize(); updateSend(); typingPing(); });
   input.addEventListener('keydown', (e) => {

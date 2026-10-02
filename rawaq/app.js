@@ -493,8 +493,10 @@
       dbResolving = (async () => {
         for (const u of cands) {
           try {
-            const r = await fetch(`${u}/keys.json?shallow=true`, { cache: 'no-store' });
-            if (r.ok) { store.set('dbUrl', u); DB = u; break; }
+            // keys/<id> is readable under the rules (keys/ itself is not); a 401 also
+            // proves the database lives on this host, a wrong region answers 404
+            const r = await fetch(`${u}/keys/PROBE.json`, { cache: 'no-store' });
+            if (r.ok || r.status === 401) { store.set('dbUrl', u); DB = u; break; }
           } catch (_) { /* wrong region or offline: try the next */ }
         }
         dbResolving = null;
@@ -507,6 +509,7 @@
   let es = null;                  // EventSource on our inbox
   let published = false;
   const pubCache = new Map();     // id -> base64 public key
+  const noKey = new Set();        // ids with no published key yet: can't get offline messages
   const aesCache = new Map();     // id -> AES-GCM CryptoKey shared with that id
   const mbReady = () => !!(DB && myKeys && S.me && owner && window.crypto && crypto.subtle);
 
@@ -556,7 +559,12 @@
     let pub = pubCache.get(id);
     if (!pub) {
       const v = await db('GET', `keys/${id}`);
-      if (typeof v !== 'string' || v.length > 200) return null; // they haven't opened Rawaq since the mailbox existed
+      if (typeof v !== 'string' || v.length > 200) { // they haven't opened Rawaq since the mailbox existed
+        noKey.add(id);
+        if (S.active === id) renderBanner();
+        return null;
+      }
+      noKey.delete(id);
       pub = v;
       pubCache.set(id, pub);
     }
@@ -684,13 +692,27 @@
     for (const [k, v] of items) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
   }
 
+  // off | connecting | on | error — shown in the profile sheet
+  let mbState = 'off';
+  function setMbState(st) {
+    mbState = st;
+    const el = document.getElementById('mb-state');
+    if (!el) return;
+    el.textContent = { off: 'غير مفعّل', connecting: 'جارٍ الاتصال…', on: 'شغّال ✓', error: 'متعطّل — ما قدرنا نوصل لـ Firebase' }[st];
+    el.dataset.state = st;
+  }
+
   async function mbStart() {
     if (es || !S.me || !owner) return;
-    if (!(await resolveDb())) return;
-    try { await loadKeys(); } catch (_) { return; }
+    if (!dbCandidates().length) { setMbState('off'); return; }
+    setMbState('connecting');
+    if (!(await resolveDb())) { setMbState('error'); return; }
+    try { await loadKeys(); } catch (_) { setMbState('error'); return; }
     if (!mbReady() || es) return;
     publishKey();
     es = new EventSource(`${DB}/inbox/${S.me.id}.json`);
+    es.onopen = () => setMbState('on');
+    es.onerror = () => setMbState(es && es.readyState === 2 ? 'error' : 'connecting');
     es.addEventListener('put', onInboxEvent);
     es.addEventListener('patch', (ev) => {
       let d;
@@ -1260,6 +1282,8 @@
     const p = S.presence.get(id);
     let text = '';
     if (S.net === 'offline') text = 'أنت غير متصل بالإنترنت. رسائلك محفوظة وبتنرسل أول ما يرجع الاتصال.';
+    else if (noKey.has(id) && p !== 'online' && msgsOf(id).some((m) => m.me && m.st === 'pending'))
+      text = `${nameOf(c)} لازم يفتح رواق مرة وحدة بالنسخة الجديدة عشان توصله رسائلك وهو مسكّر. رسالتك محفوظة وبتوصله.`;
     else if (!c.name && !msgsOf(id).length && p && p !== 'online' && p !== 'connecting') text = 'ما قدرنا نوصل لهذا المعرّف الحين. تأكد منه، أو اطلب من صاحبه يفتح رواق.';
     if (text) $('#banner-text').textContent = text;
     wrap.classList.toggle('show', !!text);
@@ -3193,6 +3217,23 @@
 
   // ---------------------------------------------------------------- boot
 
+  // Fade the launch screen out once the first view is on screen and the fonts are in,
+  // keeping it up long enough for its intro animation to read as intentional.
+  function hideSplash() {
+    const sp = document.getElementById('splash');
+    if (!sp) return;
+    if (sp.hidden) { sp.remove(); return; }
+    const minLeft = Math.max(0, 1500 - (Date.now() - (window.__splashAt || 0)));
+    const fonts = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+    Promise.race([fonts, new Promise((r) => setTimeout(r, 1800))]).then(() => {
+      setTimeout(() => {
+        sp.classList.add('out');
+        sp.addEventListener('transitionend', () => sp.remove(), { once: true });
+        setTimeout(() => sp.remove(), 900);
+      }, minLeft);
+    });
+  }
+
   async function init() {
     $('#net-text').textContent = NET_TEXT.idle;
     applyTheme();
@@ -3209,6 +3250,7 @@
       showView('welcome');
       if (!isTouch) setTimeout(() => $('#in-name').focus({ preventScroll: true }), 700);
     }
+    hideSplash();
 
     const ok = await claimTab();
     if (!ok) { showView('blocked'); return; }

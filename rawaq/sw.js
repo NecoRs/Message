@@ -1,5 +1,5 @@
 /* رواق — service worker: offline app shell + notification clicks. */
-const CACHE = 'rawaq-v4';
+const CACHE = 'rawaq-v5';
 const SHELL = [
   './',
   'index.html',

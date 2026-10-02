@@ -2076,13 +2076,19 @@
     startUpload(id, m);
   }
 
-  function startUpload(cid, m) {
+  // Every upload gets its own random, unguessable name and public ID. A fixed name
+  // ("photo.jpg") let presets that name assets after the file return someone else's
+  // earlier photo instead of storing the new one — never let that happen again.
+  const randomName = () => rand(24, 'abcdefghijkmnopqrstuvwxyz23456789');
+  function startUpload(cid, m, attempt = 0) {
     const up = uploads.get(m.id);
     if (!up || !up.blob) return;
     const fd = new FormData();
-    const name = up.kind === 'image' ? 'photo.jpg' : (up.blob.name || 'video.mp4');
-    fd.append('file', up.blob, name);
+    const pid = randomName();
+    const ext = up.kind === 'image' ? 'jpg' : ((up.blob.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
+    fd.append('file', up.blob, `${pid}.${ext}`);
     fd.append('upload_preset', CFG.cloud.uploadPreset);
+    if (attempt < 2) fd.append('public_id', pid); // a preset may forbid it; the last try relies on the random file name
     const xhr = new XMLHttpRequest();
     up.xhr = xhr;
     up.pct = 0;
@@ -2105,7 +2111,20 @@
       let res = null;
       try { res = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
       if (xhr.status < 200 || xhr.status >= 300 || !res || !res.secure_url) {
+        if (attempt < 2 && xhr.status === 400 && res && res.error && /public.?id/i.test(String(res.error.message))) {
+          up.xhr = null;
+          startUpload(cid, m, 2); // preset rejects custom public IDs
+          return;
+        }
         fail(res && res.error && res.error.message ? String(res.error.message).slice(0, 80) : '');
+        return;
+      }
+      // "existing" means the storage handed back an asset that was already there, i.e. NOT
+      // this file. Never send that link: retry under a fresh name, then give up.
+      if (res.existing === true) {
+        up.xhr = null;
+        if (attempt < 2) { startUpload(cid, m, attempt + 1); return; }
+        fail('التخزين رجّع ملف قديم بدل ملفك — راجع إعدادات الـpreset');
         return;
       }
       const media = cleanMedia({

@@ -14,7 +14,11 @@
     peer: {},              // extra PeerJS options (host, port, path, secure, config…)
     dialTimeout: 12000,    // give up on a connection attempt after this long
     probeEvery: 30000,     // how often to check whether contacts came online
+    mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
   }, window.RAWAQ_CONFIG || {});
+  CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
+  const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
+  const MAX_IMAGE = 10 * 1024 * 1024;
 
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
   const ID_LEN = 6;
@@ -56,6 +60,10 @@
     alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>',
     reply: '<path d="M10 8 5 12l5 4"/><path d="M5 12h9a5 5 0 0 1 5 5v1"/>',
     more: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
+    cloud: '<path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5Z"/>',
+    play: '<path d="M8 5.5v13l11-6.5Z" fill="currentColor"/>',
+    retry: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/>',
+    image: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4.5 17.5 5-5 4 4 2.5-2.5 3.5 3.5"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   };
   const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
@@ -163,6 +171,7 @@
     theme: store.get('theme', 'auto'),
     sound: store.get('sound', true) !== false,
     reply: null,         // { id, text, me } quoted in the next message
+    blocked: store.get('blocked', {}) || {},
     query: '',
     presence: new Map(), // id -> online | connecting | offline | unreachable
     typing: new Map(),   // id -> timer
@@ -173,6 +182,8 @@
     if (!S.msgs[id]) {
       const list = store.get('m.' + id, []);
       S.msgs[id] = Array.isArray(list) ? list : [];
+      // an upload can't survive a reload: the file is gone
+      for (const m of S.msgs[id]) if (m.st === 'uploading') m.st = 'failed';
     }
     return S.msgs[id];
   }
@@ -201,10 +212,13 @@
       c = S.contacts[id] = { id, name: heardNames.get(id) || '', unread: 0, last: null, updated: Date.now(), seen: 0 };
       saveContacts();
       renderList();
+      if (heardPh.get(id)) sendTo(id, { t: 'avatar?' });
     }
     return c;
   }
   const heardNames = new Map(); // id -> name announced over an open link
+  const heardPh = new Map();    // id -> profile photo hash announced over an open link
+  const isBlocked = (id) => !!S.blocked[id];
   const nameOf = (c) => (c && c.name) || (c && c.id) || '';
 
   // ---------------------------------------------------------------- network
@@ -252,7 +266,8 @@
     });
     p.on('connection', (conn) => {
       if (peer !== p) return;
-      if (!idFromPeer(conn.peer)) { try { conn.close(); } catch (_) { /* ignore */ } return; }
+      const pid = idFromPeer(conn.peer);
+      if (!pid || isBlocked(pid)) { try { conn.close(); } catch (_) { /* ignore */ } return; }
       adopt(conn);
     });
     p.on('disconnected', () => {
@@ -338,7 +353,7 @@
 
   function dial(id) {
     if (!peer || !peer.open || peer.disconnected || !S.me) return;
-    if (id === S.me.id || isOpen(id) || dialing.has(id)) return;
+    if (id === S.me.id || isOpen(id) || dialing.has(id) || isBlocked(id)) return;
     let conn;
     try {
       conn = peer.connect(CFG.prefix + id, { reliable: true, serialization: 'json' });
@@ -369,7 +384,7 @@
       if (!conns.has(id)) conns.set(id, new Set());
       conns.get(id).add(conn);
       conn._heard = Date.now();
-      send(conn, { t: 'hello', name: S.me.name, v: 1 });
+      send(conn, helloMsg());
       setPresence(id, 'online');
       flushOutbox(id);
       flushReceipts(id);
@@ -403,7 +418,7 @@
 
   function probeAll() {
     if (!peer || !peer.open || document.visibilityState === 'hidden') return;
-    const ids = Object.keys(S.contacts).filter((id) => !isOpen(id) && !dialing.has(id));
+    const ids = Object.keys(S.contacts).filter((id) => !isOpen(id) && !dialing.has(id) && !isBlocked(id));
     ids.forEach((id, i) => setTimeout(() => dial(id), i * 180));
   }
 
@@ -430,19 +445,44 @@
 
   // ---------------------------------------------------------------- protocol
 
+  function helloMsg() {
+    return { t: 'hello', name: S.me.name, v: 1, ph: S.me.photo ? hashStr(S.me.photo) : '' };
+  }
+  function broadcastHello() {
+    for (const id of conns.keys()) if (!isBlocked(id)) sendTo(id, helloMsg());
+  }
+
   function onData(id, d) {
-    if (!d || typeof d !== 'object') return;
+    if (!d || typeof d !== 'object' || isBlocked(id)) return;
     switch (d.t) {
       case 'hello': {
         const name = cleanName(d.name);
         if (name) heardNames.set(id, name);
+        const ph = typeof d.ph === 'string' ? d.ph.slice(0, 16) : '';
+        heardPh.set(id, ph);
         const c = S.contacts[id];
         if (c && name && name !== c.name) {
           c.name = name;
           saveContacts();
-          renderList();
-          if (S.active === id) renderChatHead();
+          refreshContact(id);
         }
+        if (c) {
+          if (!ph && c.photo) { delete c.photo; delete c.ph; saveContacts(); refreshContact(id); }
+          else if (ph && c.ph !== ph) sendTo(id, { t: 'avatar?' });
+        }
+        break;
+      }
+      case 'avatar?':
+        if (S.me.photo) sendTo(id, { t: 'avatar', ph: hashStr(S.me.photo), data: S.me.photo });
+        break;
+      case 'avatar': {
+        const c = S.contacts[id];
+        if (!c || typeof d.data !== 'string' || d.data.length > 300000 || !PHOTO_RE.test(d.data)) break;
+        if (hashStr(d.data) !== d.ph) break;
+        c.photo = d.data;
+        c.ph = d.ph;
+        saveContacts();
+        refreshContact(id);
         break;
       }
       case 'msg': receive(id, d); break;
@@ -456,8 +496,9 @@
 
   function receive(id, d) {
     if (typeof d.id !== 'string' || d.id.length > 40) return;
-    const text = cleanText(d.text);
-    if (!text.trim()) return;
+    const text = cleanText(d.text).trim();
+    const media = cleanMedia(d.media);
+    if (!text && !media) return;
     sendTo(id, { t: 'ack', id: d.id });
 
     const list = msgsOf(id);
@@ -466,6 +507,7 @@
     const c = ensureContact(id);
     const ts = Number.isFinite(d.ts) && d.ts > 0 ? Math.min(d.ts, Date.now()) : Date.now();
     const m = { id: d.id, me: false, text, ts, seen: false, rr: false };
+    if (media) m.media = media;
     const re = d.re;
     if (re && typeof re === 'object' && typeof re.id === 'string' && re.id.length <= 40 && typeof re.text === 'string') {
       // "by" is from the sender's side: 's' = they quoted themselves, 'r' = they quoted us
@@ -476,14 +518,14 @@
     saveMsgs(id);
     setTyping(id, false);
 
-    c.last = { text: text.slice(0, 140), me: false, ts };
+    c.last = { text: mediaLabel(m).slice(0, 140), me: false, ts };
     c.updated = Date.now();
     if (isViewing(id)) {
       m.seen = true;
       flushReceipts(id);
     } else {
       c.unread = (c.unread || 0) + 1;
-      notify(c, text);
+      notify(c, mediaLabel(m));
     }
     chime('in');
     saveContacts();
@@ -513,6 +555,7 @@
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
     if (m.re) o.re = { id: m.re.id, text: m.re.text, by: m.re.me ? 's' : 'r' };
+    if (m.media) o.media = { kind: m.media.kind, url: m.media.url, w: m.media.w, h: m.media.h, dur: m.media.dur };
     return o;
   }
 
@@ -573,7 +616,7 @@
 
   function sendMessage(text, re) {
     const id = S.active;
-    if (!id) return;
+    if (!id || isBlocked(id)) return;
     const c = ensureContact(id);
     const m = { id: msgId(), me: true, text, ts: Date.now(), st: 'pending' };
     if (re) m.re = re;
@@ -650,16 +693,29 @@
   const currentView = () => document.body.dataset.view;
 
   function setAvatar(node, c) {
-    const label = c ? (c.name ? firstLetter(c.name) : '#') : '';
-    node.dataset.letter = label;
+    const photo = c && c.photo && PHOTO_RE.test(c.photo) ? c.photo : '';
+    node.dataset.letter = photo ? '' : c ? (c.name ? firstLetter(c.name) : '#') : '';
+    node.style.backgroundImage = photo ? `url("${photo}")` : '';
+    node.classList.toggle('has-photo', !!photo);
   }
 
   function renderMe() {
     if (!S.me) return;
     $$('[data-my-id]').forEach((n) => { n.textContent = S.me.id; });
-    $('#me-avatar').dataset.letter = firstLetter(S.me.name);
-    $('#p-avatar').dataset.letter = firstLetter(S.me.name);
+    setAvatar($('#me-avatar'), S.me);
+    setAvatar($('#p-avatar'), S.me);
+    $('#p-avatar').classList.toggle('ink', !S.me.photo);
+    $('#btn-photo-remove').hidden = !S.me.photo;
     $('#id-hello').textContent = S.me.name;
+  }
+
+  function refreshContact(id) {
+    renderList();
+    if (S.active === id) {
+      renderChatHead();
+      const intro = $('.chat-intro .avatar', box);
+      if (intro) setAvatar(intro, S.contacts[id]);
+    }
   }
 
   function renderIdCode() {
@@ -745,13 +801,14 @@
     const b = li.firstChild;
     const av = $('.avatar', b);
     setAvatar(av, c);
-    av.classList.toggle('online', S.presence.get(c.id) === 'online');
+    av.classList.toggle('online', S.presence.get(c.id) === 'online' && !isBlocked(c.id));
     $('.item-name', b).textContent = nameOf(c);
     $('.item-time', b).textContent = c.last ? listTime(c.last.ts) : '';
     const prev = $('.item-preview', b);
     const typing = S.typing.has(c.id);
     prev.classList.toggle('typing', typing);
-    prev.textContent = typing ? 'يكتب…'
+    prev.textContent = isBlocked(c.id) ? 'محظور'
+      : typing ? 'يكتب…'
       : c.last ? (c.last.me ? 'أنت: ' : '') + c.last.text.replace(/\s+/g, ' ')
       : 'محادثة جديدة';
     b.classList.toggle('unread', c.unread > 0);
@@ -800,6 +857,7 @@
     autosize();
     updateSend();
     cancelReply();
+    renderComposer();
     renderChatHead(true);
     const firstUnread = msgsOf(id).find((m) => !m.me && !m.seen);
     renderMessages(firstUnread && firstUnread.id);
@@ -859,12 +917,13 @@
     $('#c-name').textContent = nameOf(c);
     const av = $('#c-avatar');
     setAvatar(av, c);
-    av.classList.toggle('online', S.presence.get(id) === 'online');
+    av.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
 
     let text;
     let cls = '';
     const p = S.presence.get(id);
-    if (S.typing.has(id)) { text = 'يكتب…'; cls = 'typing'; }
+    if (isBlocked(id)) text = 'محظور';
+    else if (S.typing.has(id)) { text = 'يكتب…'; cls = 'typing'; }
     else if (p === 'online') { text = 'متصل الآن'; cls = 'on'; }
     else if (S.net !== 'online') text = S.net === 'offline' ? 'لا يوجد إنترنت' : 'جارٍ الاتصال…';
     else if (p === 'connecting' || p == null) text = 'جارٍ التحقق…';
@@ -885,7 +944,7 @@
   function renderBanner() {
     const id = S.active;
     const wrap = $('#banner-wrap');
-    if (!id) { wrap.classList.remove('show'); return; }
+    if (!id || isBlocked(id)) { wrap.classList.remove('show'); return; }
     const c = S.contacts[id];
     const pending = msgsOf(id).some((m) => m.me && m.st === 'pending');
     const p = S.presence.get(id);
@@ -969,7 +1028,7 @@
   function bubbleFor(m, cont) {
     const row = el('div', 'msg ' + (m.me ? 'me' : 'them') + (cont ? ' cont' : ''));
     row.dataset.id = m.id;
-    if (isJumbo(m.text)) row.classList.add('jumbo');
+    if (!m.media && isJumbo(m.text)) row.classList.add('jumbo');
     const b = el('div', 'bubble');
     if (!isRtl(m.text)) b.classList.add('ltr');
     if (m.re) {
@@ -983,10 +1042,18 @@
       b.appendChild(q);
       row.classList.remove('jumbo');
     }
-    const p = el('p', 'text');
-    p.dir = 'auto';
-    linkify(p, m.text);
-    p.appendChild(el('span', 'meta-space'));
+    if (m.media) {
+      b.classList.add('has-media');
+      if (!m.text) b.classList.add('media-only');
+      b.appendChild(mediaNode(m));
+    }
+    if (m.text || !m.media) {
+      const p = el('p', 'text');
+      p.dir = 'auto';
+      linkify(p, m.text);
+      p.appendChild(el('span', 'meta-space'));
+      b.appendChild(p);
+    }
     const meta = el('span', 'meta');
     const t = el('time', null, fTime.format(m.ts));
     t.dateTime = new Date(m.ts).toISOString();
@@ -996,7 +1063,7 @@
       setTick(tk, m.st);
       meta.appendChild(tk);
     }
-    b.append(p, meta);
+    b.append(meta);
     const rx = reactionsOf(m);
     if (rx.length) {
       const pill = el('span', 'rx');
@@ -1031,6 +1098,8 @@
   }
 
   const TICK = {
+    uploading: ['cloud', 'جارٍ الرفع'],
+    failed: ['alert', 'فشل الرفع'],
     pending: ['clock', 'بانتظار الإرسال'],
     delivered: ['check', 'وصلت'],
     read: ['checks', 'قُرئت'],
@@ -1041,6 +1110,7 @@
     tk.title = label;
     tk.setAttribute('aria-label', label);
     tk.classList.toggle('read', st === 'read');
+    tk.classList.toggle('failed', st === 'failed');
   }
   function updateTick(m) {
     const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
@@ -1149,9 +1219,9 @@
 
   function startReply(m) {
     if (!S.active) return;
-    S.reply = { id: m.id, text: m.text.slice(0, 160), me: m.me };
+    S.reply = { id: m.id, text: mediaLabel(m).slice(0, 160), me: m.me };
     $('#reply-name').textContent = m.me ? 'الرد على رسالتك' : `الرد على ${nameOf(S.contacts[S.active])}`;
-    $('#reply-text').textContent = m.text.replace(/\s+/g, ' ');
+    $('#reply-text').textContent = mediaLabel(m).replace(/\s+/g, ' ');
     $('#reply-wrap').classList.add('show');
     input.focus({ preventScroll: true });
     if (stick) setTimeout(() => scrollToBottom(true), 60);
@@ -1183,10 +1253,16 @@
     const c = S.contacts[id];
     const last = list[list.length - 1];
     if (c) {
-      c.last = last ? { text: last.text.slice(0, 140), me: last.me, ts: last.ts } : null;
+      c.last = last ? { text: mediaLabel(last).slice(0, 140), me: last.me, ts: last.ts } : null;
       saveContacts();
     }
     if (S.reply && S.reply.id === m.id) cancelReply();
+    const up = uploads.get(m.id);
+    if (up) {
+      if (up.xhr) up.xhr.abort();
+      if (up.preview) setTimeout(() => URL.revokeObjectURL(up.preview), 1000);
+      uploads.delete(m.id);
+    }
     const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
     const rerender = () => renderMessages(null, true);
     if (row) {
@@ -1218,6 +1294,7 @@
       b.addEventListener('click', () => { const msg = ctxMsg; closeCtx(); if (msg) react(msg, e); });
       rr.appendChild(b);
     });
+    $('[data-act="copy"]', ctxCard).hidden = !m.text;
     ctx.hidden = false;
     row.classList.add('held');
 
@@ -1279,6 +1356,20 @@
     }
     const q = e.target.closest('.quote');
     if (q) { jumpTo(q.dataset.ref); return; }
+    const upBtn = e.target.closest('[data-up]');
+    if (upBtn) {
+      const m = msgOfRow(upBtn.closest('.msg'));
+      if (!m) return;
+      if (upBtn.dataset.up === 'cancel') deleteMsg(m);
+      else retryUpload(m);
+      return;
+    }
+    const view = e.target.closest('[data-view]');
+    if (view) {
+      const m = msgOfRow(view.closest('.msg'));
+      if (m) openViewer(m);
+      return;
+    }
     const tool = e.target.closest('[data-tool]');
     if (!tool) return;
     const row = tool.closest('.msg');
@@ -1358,6 +1449,434 @@
   // keep the keyboard open on phones when tapping send
   $('#send').addEventListener('pointerdown', (e) => { if (document.activeElement === input) e.preventDefault(); });
   $('#send').addEventListener('animationend', (e) => e.currentTarget.classList.remove('fly'));
+
+  // ---------------------------------------------------------------- images
+
+  const PHOTO_RE = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+  function hashStr(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(36);
+  }
+
+  async function loadBitmap(file) {
+    if ('createImageBitmap' in window) {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) { /* fall back */ }
+    }
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { resolve(img); setTimeout(() => URL.revokeObjectURL(url), 0); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+      img.src = url;
+    });
+  }
+  const sizeOf = (b) => ({ w: b.width || b.naturalWidth || 0, h: b.height || b.naturalHeight || 0 });
+
+  // Square-cropped 256px JPEG: small enough to send over the data channel.
+  async function makeAvatar(file) {
+    const bmp = await loadBitmap(file);
+    const { w, h } = sizeOf(bmp);
+    const side = Math.min(w, h);
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 256, 256);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bmp, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 256, 256);
+    if (bmp.close) bmp.close();
+    return cv.toDataURL('image/jpeg', 0.85);
+  }
+
+  // Re-encode photos (max 2048px) before upload: smaller, and strips EXIF such as GPS location.
+  async function prepareImage(file) {
+    const bmp = await loadBitmap(file);
+    const { w, h } = sizeOf(bmp);
+    if (file.type === 'image/gif') { if (bmp.close) bmp.close(); return { blob: file, w, h }; }
+    const k = Math.min(1, 2048 / Math.max(w, h));
+    const W = Math.max(1, Math.round(w * k));
+    const H = Math.max(1, Math.round(h * k));
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, W, H);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bmp, 0, 0, W, H);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.86));
+    return { blob: blob || file, w: W, h: H };
+  }
+
+  function probeVideo(file) {
+    return new Promise((resolve) => {
+      const v = document.createElement('video');
+      const url = URL.createObjectURL(file);
+      const done = (info) => { clearTimeout(t); URL.revokeObjectURL(url); resolve(info); };
+      const t = setTimeout(() => done({ w: 0, h: 0, dur: 0 }), 5000);
+      v.preload = 'metadata';
+      v.muted = true;
+      v.onloadedmetadata = () => done({ w: v.videoWidth, h: v.videoHeight, dur: Number.isFinite(v.duration) ? v.duration : 0 });
+      v.onerror = () => done({ w: 0, h: 0, dur: 0 });
+      v.src = url;
+    });
+  }
+
+  const fmtDur = (sec) => {
+    const s = Math.max(0, Math.round(sec || 0));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+  const fmtSize = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' ميجا' : Math.max(1, Math.round(b / 1024)) + ' كيلو');
+
+  // ---------------------------------------------------------------- media messages
+
+  const uploads = new Map(); // message id -> { blob, preview, kind, xhr, pct }
+  const cloudReady = () => !!(CFG.cloud.uploadPreset && (CFG.cloud.cloudName || CFG.cloud.uploadUrl));
+  const uploadUrl = () => CFG.cloud.uploadUrl ||
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(CFG.cloud.cloudName)}/auto/upload`;
+
+  function cleanMedia(x) {
+    if (!x || typeof x !== 'object') return null;
+    const kind = x.kind === 'video' ? 'video' : x.kind === 'image' ? 'image' : null;
+    if (!kind || typeof x.url !== 'string' || x.url.length > 600 || /[\s"'<>\\]/.test(x.url)) return null;
+    if (!CFG.mediaHosts.some((h) => x.url.startsWith(h))) return null;
+    const num = (v, max) => (Number.isFinite(v) && v > 0 && v <= max ? Math.round(v) : 0);
+    return { kind, url: x.url, w: num(x.w, 20000), h: num(x.h, 20000), dur: num(x.dur, 36000) };
+  }
+
+  function mediaLabel(m) {
+    if (!m.media) return m.text;
+    const label = m.media.kind === 'video' ? '🎥 فيديو' : '📷 صورة';
+    return m.text ? `${label} · ${m.text}` : label;
+  }
+
+  // Cloudinary can resize on the fly; other hosts are used as-is.
+  function cdn(url, t) {
+    const i = url.indexOf('/upload/');
+    if (i < 0 || !url.startsWith('https://res.cloudinary.com/')) return url;
+    return url.slice(0, i + 8) + t + '/' + url.slice(i + 8);
+  }
+  function thumbUrl(md) {
+    if (md.kind === 'image') return cdn(md.url, 'c_limit,w_900,q_auto,f_auto');
+    if (!md.url.startsWith('https://res.cloudinary.com/')) return '';
+    return cdn(md.url, 'so_0,c_limit,w_900,q_auto').replace(/\.[a-z0-9]+$/i, '.jpg');
+  }
+
+  const RING = 2 * Math.PI * 16;
+  function mediaNode(m) {
+    const md = m.media;
+    const up = uploads.get(m.id);
+    const fig = el('div', 'media ' + md.kind);
+    const ratio = md.w && md.h ? Math.min(1.9, Math.max(0.6, md.w / md.h)) : md.kind === 'video' ? 16 / 9 : 4 / 3;
+    fig.style.aspectRatio = String(ratio);
+    const local = up && up.preview;
+    const src = local || (md.url ? thumbUrl(md) : '');
+    if (md.kind === 'image' && src) {
+      const img = el('img');
+      img.alt = 'صورة';
+      img.decoding = 'async';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      img.draggable = false;
+      img.onerror = () => fig.classList.add('broken');
+      img.src = src;
+      fig.appendChild(img);
+    } else if (md.kind === 'video' && local) {
+      const v = el('video');
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = 'metadata';
+      v.src = local + '#t=0.1';
+      fig.appendChild(v);
+    } else if (md.kind === 'video' && src) {
+      const img = el('img');
+      img.alt = 'فيديو';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      img.draggable = false;
+      img.onerror = () => img.remove();
+      img.src = src;
+      fig.appendChild(img);
+    } else if (md.kind === 'image') {
+      fig.classList.add('broken');
+    }
+    if (md.kind === 'video') {
+      const play = el('span', 'play');
+      play.innerHTML = svg('play');
+      fig.appendChild(play);
+      if (md.dur) fig.appendChild(el('span', 'dur', fmtDur(md.dur)));
+    }
+    if (m.st === 'uploading') {
+      const o = el('div', 'up');
+      const pct = up ? up.pct || 0 : 0;
+      o.innerHTML = `<svg class="ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="track" cx="20" cy="20" r="16"/>` +
+        `<circle class="bar" cx="20" cy="20" r="16" stroke-dasharray="${RING}" stroke-dashoffset="${RING * (1 - pct)}"/></svg>`;
+      const x = el('button', 'up-btn');
+      x.type = 'button';
+      x.dataset.up = 'cancel';
+      x.setAttribute('aria-label', 'إلغاء الرفع');
+      x.innerHTML = '<svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>';
+      o.appendChild(x);
+      fig.appendChild(o);
+    } else if (m.st === 'failed') {
+      const o = el('div', 'up failed');
+      const canRetry = !!(up && up.blob);
+      const b = el('button', 'up-btn wide');
+      b.type = 'button';
+      b.dataset.up = canRetry ? 'retry' : 'cancel';
+      b.innerHTML = svg(canRetry ? 'retry' : 'trash') + `<span>${canRetry ? 'إعادة الرفع' : 'فشل الرفع'}</span>`;
+      o.appendChild(b);
+      fig.appendChild(o);
+    } else if (md.url) {
+      fig.dataset.view = '1';
+      fig.setAttribute('role', 'button');
+      fig.tabIndex = 0;
+      fig.setAttribute('aria-label', md.kind === 'video' ? 'تشغيل الفيديو' : 'عرض الصورة');
+    }
+    if (md.kind === 'image' && !src) fig.insertAdjacentHTML('beforeend', svg('image'));
+    return fig;
+  }
+
+  function paintProgress(mid, pct) {
+    const bar = box.querySelector(`.msg[data-id="${CSS.escape(mid)}"] .ring .bar`);
+    if (bar) bar.setAttribute('stroke-dashoffset', String(RING * (1 - pct)));
+  }
+
+  let pendingFile = null;
+  async function pickMedia(file) {
+    const id = S.active;
+    if (!file || !id || isBlocked(id)) return;
+    if (!cloudReady()) {
+      toast('رفع الصور والفيديو يحتاج تفعيل التخزين السحابي في config.js', { icon: 'alert', ms: 5000 });
+      return;
+    }
+    const kind = /^video\//.test(file.type) ? 'video' : /^image\//.test(file.type) ? 'image' : null;
+    if (!kind) { toast('تقدر ترسل صور وفيديوهات فقط', { icon: 'alert' }); return; }
+    if (kind === 'video' && file.size > MAX_VIDEO) { toast('الفيديو أكبر من 100 ميجا', { icon: 'alert' }); return; }
+    if (kind === 'image' && file.size > 4 * MAX_IMAGE) { toast('الصورة كبيرة جداً', { icon: 'alert' }); return; }
+    let prep;
+    try {
+      prep = kind === 'image' ? await prepareImage(file) : Object.assign({ blob: file }, await probeVideo(file));
+    } catch (_) {
+      toast('ما قدرنا نقرأ الملف', { icon: 'alert' });
+      return;
+    }
+    if (kind === 'image' && prep.blob.size > MAX_IMAGE) { toast('الصورة أكبر من 10 ميجا', { icon: 'alert' }); return; }
+    if (S.active !== id) return;
+    pendingFile = Object.assign({ kind, chat: id, preview: URL.createObjectURL(prep.blob) }, prep);
+
+    const pv = $('#media-preview');
+    pv.textContent = '';
+    if (kind === 'image') {
+      const img = el('img');
+      img.alt = '';
+      img.src = pendingFile.preview;
+      pv.appendChild(img);
+    } else {
+      const v = el('video');
+      v.src = pendingFile.preview;
+      v.controls = true;
+      v.playsInline = true;
+      v.muted = true;
+      pv.appendChild(v);
+    }
+    const bits = [kind === 'image' ? 'صورة' : 'فيديو', fmtSize(prep.blob.size)];
+    if (prep.w && prep.h) bits.push(`${prep.w}×${prep.h}`);
+    if (prep.dur) bits.push(fmtDur(prep.dur));
+    $('#media-info').textContent = bits.join(' · ');
+    $('#in-caption').value = input.value.trim();
+    openModal('m-media', isTouch ? null : '#in-caption');
+    openM._onClose = () => {
+      if (pendingFile) { URL.revokeObjectURL(pendingFile.preview); pendingFile = null; }
+      const vid = $('#media-preview video');
+      if (vid) vid.pause();
+    };
+  }
+
+  function sendMedia(pf, caption) {
+    const id = pf.chat;
+    if (!S.contacts[id] || isBlocked(id)) return;
+    const c = ensureContact(id);
+    const m = {
+      id: msgId(), me: true, text: cleanText(caption).trim(), ts: Date.now(), st: 'uploading',
+      media: { kind: pf.kind, w: pf.w || 0, h: pf.h || 0, dur: Math.round(pf.dur || 0) },
+    };
+    if (S.reply && S.active === id) { m.re = S.reply; cancelReply(); }
+    uploads.set(m.id, { blob: pf.blob, preview: pf.preview, kind: pf.kind, pct: 0 });
+    const list = msgsOf(id);
+    list.push(m);
+    trim(list);
+    saveMsgs(id);
+    c.last = { text: mediaLabel(m).slice(0, 140), me: true, ts: m.ts };
+    c.updated = Date.now();
+    saveContacts();
+    if (S.active === id) appendMessage(m, true);
+    renderList();
+    chime('out');
+    startUpload(id, m);
+  }
+
+  function startUpload(cid, m) {
+    const up = uploads.get(m.id);
+    if (!up || !up.blob) return;
+    const fd = new FormData();
+    const name = up.kind === 'image' ? 'photo.jpg' : (up.blob.name || 'video.mp4');
+    fd.append('file', up.blob, name);
+    fd.append('upload_preset', CFG.cloud.uploadPreset);
+    const xhr = new XMLHttpRequest();
+    up.xhr = xhr;
+    up.pct = 0;
+    xhr.open('POST', uploadUrl());
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      up.pct = e.loaded / e.total;
+      if (S.active === cid) paintProgress(m.id, up.pct);
+    };
+    const fail = (why) => {
+      up.xhr = null;
+      if (!uploads.has(m.id)) return; // cancelled
+      m.st = 'failed';
+      saveMsgs(cid);
+      if (S.active === cid) refreshRow(m);
+      toast(why ? `فشل الرفع: ${why}` : 'فشل رفع الملف — جرّب مرة ثانية', { icon: 'alert', ms: 4000 });
+    };
+    xhr.onerror = () => fail('');
+    xhr.onload = () => {
+      let res = null;
+      try { res = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+      if (xhr.status < 200 || xhr.status >= 300 || !res || !res.secure_url) {
+        fail(res && res.error && res.error.message ? String(res.error.message).slice(0, 80) : '');
+        return;
+      }
+      const media = cleanMedia({
+        kind: m.media.kind, url: res.secure_url,
+        w: res.width || m.media.w, h: res.height || m.media.h, dur: res.duration || m.media.dur,
+      });
+      if (!media) { fail('رابط غير متوقع من التخزين'); return; }
+      up.xhr = null;
+      up.blob = null; // keep the local preview so the bubble doesn't flicker
+      m.media = media;
+      m.st = 'pending';
+      saveMsgs(cid);
+      if (S.active === cid) { refreshRow(m); renderBanner(); }
+      if (isOpen(cid)) sendTo(cid, wireMsg(m)); else dial(cid);
+    };
+    xhr.send(fd);
+    m.st = 'uploading';
+  }
+
+  function retryUpload(m) {
+    const up = uploads.get(m.id);
+    if (!up || !up.blob) return;
+    m.st = 'uploading';
+    refreshRow(m);
+    startUpload(S.active, m);
+  }
+
+  // ---------------------------------------------------------------- viewer
+
+  const viewer = $('#viewer');
+  function openViewer(m) {
+    const md = m.media;
+    if (!md || !md.url) return;
+    const stage = $('#viewer-stage');
+    stage.textContent = '';
+    if (md.kind === 'image') {
+      const img = el('img');
+      img.alt = m.text || 'صورة';
+      img.referrerPolicy = 'no-referrer';
+      img.draggable = false;
+      img.src = cdn(md.url, 'q_auto,f_auto');
+      stage.appendChild(img);
+    } else {
+      const v = el('video');
+      v.controls = true;
+      v.autoplay = true;
+      v.playsInline = true;
+      v.setAttribute('controlsList', 'nodownload');
+      v.src = md.url;
+      stage.appendChild(v);
+    }
+    $('#viewer-caption').textContent = m.text || '';
+    viewer.hidden = false;
+    void viewer.offsetWidth;
+    viewer.classList.add('open');
+    $('#viewer-close').focus({ preventScroll: true });
+  }
+  function closeViewer() {
+    if (viewer.hidden) return;
+    viewer.classList.remove('open');
+    const v = $('#viewer-stage video');
+    if (v) v.pause();
+    setTimeout(() => { if (!viewer.classList.contains('open')) { viewer.hidden = true; $('#viewer-stage').textContent = ''; } }, 320);
+  }
+  $('#viewer-close').addEventListener('click', closeViewer);
+  viewer.addEventListener('click', (e) => { if (e.target === viewer || e.target.id === 'viewer-stage') closeViewer(); });
+
+  // ---------------------------------------------------------------- blocking
+
+  function dropPeer(id) {
+    const d = dialing.get(id);
+    if (d) { clearTimeout(d.timer); dialing.delete(id); try { d.conn.close(); } catch (_) { /* ignore */ } }
+    const set = conns.get(id);
+    conns.delete(id);
+    if (set) for (const c of set) { try { c.close(); } catch (_) { /* ignore */ } }
+    S.presence.delete(id);
+  }
+
+  function setBlocked(id, on) {
+    if (on) {
+      S.blocked[id] = { at: Date.now(), name: nameOf(S.contacts[id]) || heardNames.get(id) || '' };
+      setTyping(id, false);
+      dropPeer(id);
+    } else {
+      delete S.blocked[id];
+    }
+    store.set('blocked', S.blocked);
+    renderList();
+    if (S.active === id) { renderComposer(); renderChatHead(true); renderBanner(); }
+    if (!on) dial(id);
+  }
+
+  function renderComposer() {
+    const id = S.active;
+    const blocked = !!id && isBlocked(id);
+    $('#composer').hidden = blocked;
+    $('#blocked-bar').hidden = !blocked;
+    if (blocked) {
+      $('#blocked-text').textContent = `حظرت ${nameOf(S.contacts[id]) || id}. ما يقدر يراسلك ولا يشوف حالتك.`;
+      cancelReply();
+    }
+  }
+
+  function renderBlocked() {
+    const ids = Object.keys(S.blocked);
+    $('#blocked-count').textContent = ids.length ? String(ids.length) : '';
+    const ul = $('#blocked-list');
+    ul.textContent = '';
+    $('#blocked-empty').hidden = ids.length > 0;
+    for (const id of ids) {
+      const c = S.contacts[id] || { id, name: S.blocked[id].name || '' };
+      const li = el('li', 'blocked-item');
+      const av = el('span', 'avatar sm');
+      setAvatar(av, c);
+      const who = el('span', 'blocked-who');
+      const nm = el('b', null, nameOf(c));
+      nm.dir = 'auto';
+      who.append(nm, el('small', 'mono', id));
+      const btn = el('button', 'btn btn-soft', 'إلغاء الحظر');
+      btn.type = 'button';
+      btn.addEventListener('click', () => {
+        setBlocked(id, false);
+        renderBlocked();
+        toast(`ألغيت حظر ${nameOf(c)}`, { icon: 'check' });
+      });
+      li.append(av, who, btn);
+      ul.appendChild(li);
+    }
+  }
 
   // ---------------------------------------------------------------- feedback
 
@@ -1560,6 +2079,7 @@
       return;
     }
     if (e.key !== 'Escape') return;
+    if (!viewer.hidden) { closeViewer(); return; }
     if (!ctx.hidden) { closeCtx(); return; }
     if (S.reply && document.activeElement === input) { cancelReply(); return; }
     if (openM) closeModal();
@@ -1697,6 +2217,7 @@
     $('#btn-theme').addEventListener('click', () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'));
     $('#btn-me').addEventListener('click', () => {
       $('#in-rename').value = S.me.name;
+      renderBlocked();
       renderNotify();
       renderSound();
       renderInstall();
@@ -1749,7 +2270,7 @@
       S.me.name = name;
       store.set('profile', S.me);
       renderMe();
-      for (const id of conns.keys()) sendTo(id, { t: 'hello', name, v: 1 });
+      broadcastHello();
       toast('تم حفظ اسمك', { icon: 'check' });
       closeModal();
     });
@@ -1770,6 +2291,118 @@
         toast('اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»', { icon: 'alert', ms: 5000 });
       }
     });
+
+    // profile photo
+    $('#btn-photo').addEventListener('click', () => $('#in-photo').click());
+    $('#in-photo').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      if (!/^image\//.test(file.type)) { toast('اختر صورة', { icon: 'alert' }); return; }
+      try {
+        const data = await makeAvatar(file);
+        if (!PHOTO_RE.test(data) || data.length > 300000) throw new Error('bad');
+        S.me.photo = data;
+        store.set('profile', S.me);
+        renderMe();
+        broadcastHello();
+        toast('تم تحديث صورتك', { icon: 'check' });
+      } catch (_) {
+        toast('ما قدرنا نقرأ الصورة', { icon: 'alert' });
+      }
+    });
+    $('#btn-photo-remove').addEventListener('click', () => {
+      delete S.me.photo;
+      store.set('profile', S.me);
+      renderMe();
+      broadcastHello();
+      toast('تمت إزالة الصورة', { icon: 'check' });
+    });
+
+    // blocking
+    $('#btn-blocked').addEventListener('click', () => { renderBlocked(); openModal('m-blocked'); });
+    $('#btn-block').addEventListener('click', async () => {
+      const id = S.active;
+      if (!id) return;
+      const c = S.contacts[id];
+      if (isBlocked(id)) {
+        closeModal();
+        setBlocked(id, false);
+        toast(`ألغيت حظر ${nameOf(c)}`, { icon: 'check' });
+        return;
+      }
+      const ok = await confirmBox(`حظر ${nameOf(c)}؟`, 'ما يقدر يراسلك ولا يشوف إذا كنت متصل. تقدر تلغي الحظر متى ما بغيت.', 'حظر');
+      if (!ok) return;
+      setBlocked(id, true);
+      toast(`تم حظر ${nameOf(c)}`, { icon: 'check' });
+    });
+    $('#btn-unblock-inline').addEventListener('click', () => {
+      const id = S.active;
+      if (!id) return;
+      setBlocked(id, false);
+      toast(`ألغيت حظر ${nameOf(S.contacts[id])}`, { icon: 'check' });
+    });
+
+    // media
+    $('#btn-attach').addEventListener('click', () => {
+      if (!cloudReady()) {
+        toast('رفع الصور والفيديو يحتاج تفعيل التخزين السحابي في config.js', { icon: 'alert', ms: 5000 });
+        return;
+      }
+      $('#in-media').click();
+    });
+    $('#in-media').addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      pickMedia(file);
+    });
+    $('#f-media').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const pf = pendingFile;
+      if (!pf) return;
+      pendingFile = null;
+      const caption = $('#in-caption').value;
+      if (caption.trim() && caption.trim() === input.value.trim()) {
+        input.value = '';
+        if (S.active) S.drafts[S.active] = '';
+        autosize();
+        updateSend();
+      }
+      closeModal();
+      sendMedia(pf, caption);
+    });
+    input.addEventListener('paste', (e) => {
+      const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+      const item = items.find((it) => it.kind === 'file' && /^(image|video)\//.test(it.type));
+      if (!item) return;
+      e.preventDefault();
+      pickMedia(item.getAsFile());
+    });
+    const pane = $('#chat-pane');
+    const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    let dragDepth = 0;
+    pane.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e) || !S.active || isBlocked(S.active)) return;
+      e.preventDefault();
+      dragDepth++;
+      $('#drop-zone').classList.add('show');
+    });
+    pane.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+    pane.addEventListener('dragleave', () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) $('#drop-zone').classList.remove('show');
+    });
+    pane.addEventListener('drop', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      $('#drop-zone').classList.remove('show');
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) pickMedia(file);
+    });
+    // a file dropped anywhere else must not navigate away from the app
+    window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+    window.addEventListener('drop', (e) => { if (hasFiles(e)) e.preventDefault(); });
 
     // search
     const q = $('#q');
@@ -1825,6 +2458,7 @@
       if (!c) return;
       $('#m-chat-title').textContent = nameOf(c);
       $('#m-chat-id').textContent = c.id;
+      $('#btn-block-label').textContent = isBlocked(c.id) ? 'إلغاء الحظر' : 'حظر المستخدم';
       openModal('m-chat');
     });
     $('#btn-copy-peer').addEventListener('click', () => {

@@ -1,5 +1,5 @@
 /* رواق — service worker: offline app shell + notification clicks. */
-const CACHE = 'rawaq-v2';
+const CACHE = 'rawaq-v3';
 const SHELL = [
   './',
   'index.html',
@@ -7,6 +7,7 @@ const SHELL = [
   'app.js',
   'vendor/peerjs.min.js',
   'vendor/qrcode.min.js',
+  'config.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

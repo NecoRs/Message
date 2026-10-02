@@ -224,6 +224,10 @@
               </div>
             </div>
             <div class="composer-box">
+              <button class="attach" id="btn-attach" type="button" aria-label="إرسال صورة أو فيديو">
+                <svg class="i" viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
+              </button>
+              <input type="file" id="in-media" accept="image/*,video/*" hidden>
               <label class="sr-only" for="input">رسالتك</label>
               <textarea id="input" rows="1" placeholder="اكتب رسالة…" maxlength="2000" dir="auto" enterkeyhint="send"></textarea>
               <button class="send" id="send" type="submit" aria-label="إرسال" disabled>
@@ -231,6 +235,14 @@
               </button>
             </div>
           </form>
+          <div class="blocked-bar" id="blocked-bar" hidden>
+            <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+            <span id="blocked-text"></span>
+            <button class="btn btn-soft" type="button" id="btn-unblock-inline">إلغاء الحظر</button>
+          </div>
+          <div class="drop-zone" id="drop-zone" aria-hidden="true">
+            <div><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><b>أفلت الصورة أو الفيديو هنا</b></div>
+          </div>
         </div>
       </main>
     </section>
@@ -293,7 +305,12 @@
       </div>
 
       <div class="profile-top">
-        <span class="avatar xl" id="p-avatar"></span>
+        <button class="photo-pick" id="btn-photo" type="button" aria-label="تغيير صورة البروفايل">
+          <span class="avatar xl" id="p-avatar"></span>
+          <span class="photo-badge"><svg class="i" viewBox="0 0 24 24"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.8l1.4-2h4.6l1.4 2h1.8A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5Z"/><circle cx="12" cy="12.5" r="3.5"/></svg></span>
+        </button>
+        <button class="link-btn" id="btn-photo-remove" type="button" hidden>إزالة الصورة</button>
+        <input type="file" id="in-photo" accept="image/*" hidden>
       </div>
 
       <form class="field-group" id="f-rename" novalidate>
@@ -345,6 +362,11 @@
         <span>ثبّت رواق كتطبيق</span>
         <span class="row-btn-state" id="install-state"></span>
       </button>
+      <button class="row-btn" id="btn-blocked" type="button">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+        <span>المحظورون</span>
+        <span class="row-btn-state" id="blocked-count"></span>
+      </button>
       <button class="row-btn danger" id="btn-reset" type="button">
         <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
         <span>حذف بياناتي من هذا الجهاز</span>
@@ -373,10 +395,68 @@
         <span>نسخ معرّفه</span>
         <b class="row-btn-state mono" dir="ltr" id="m-chat-id"></b>
       </button>
+      <button class="row-btn" id="btn-block" type="button">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+        <span id="btn-block-label">حظر المستخدم</span>
+      </button>
       <button class="row-btn danger" id="btn-delete-chat" type="button">
         <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
         <span>حذف المحادثة</span>
       </button>
+    </div>
+  </div>
+
+  <!-- Blocked users -->
+  <div class="modal" id="m-blocked" role="dialog" aria-modal="true" aria-labelledby="m-blocked-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet sheet-sm">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-blocked-title">المحظورون</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <ul class="blocked-list" id="blocked-list"></ul>
+      <p class="muted blocked-empty" id="blocked-empty">ما حظرت أحد.</p>
+    </div>
+  </div>
+
+  <!-- Media preview before sending -->
+  <div class="modal" id="m-media" role="dialog" aria-modal="true" aria-labelledby="m-media-title" hidden>
+    <div class="backdrop" data-close></div>
+    <form class="sheet" id="f-media" novalidate>
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-media-title">إرسال</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="media-preview" id="media-preview"></div>
+      <p class="muted media-info" id="media-info"></p>
+      <div class="row-input">
+        <label class="sr-only" for="in-caption">تعليق</label>
+        <input class="input" id="in-caption" maxlength="1000" placeholder="أضف تعليقاً (اختياري)" dir="auto" autocomplete="off" enterkeyhint="send">
+        <button class="send send-lg" type="submit" aria-label="إرسال">
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
+        </button>
+      </div>
+      <p class="fineprint media-note">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5Z"/></svg>
+        <span>الصور والفيديوهات تنرفع لتخزين سحابي، والرسالة تحمل رابطها فقط.</span>
+      </p>
+    </form>
+  </div>
+
+  <!-- Full-screen media viewer -->
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="عرض الوسائط" hidden>
+    <div class="viewer-stage" id="viewer-stage"></div>
+    <div class="viewer-bar">
+      <button class="icon-btn" id="viewer-close" type="button" aria-label="إغلاق">
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <span class="viewer-caption" id="viewer-caption" dir="auto"></span>
     </div>
   </div>
 
@@ -445,6 +525,7 @@
 
   <script src="vendor/peerjs.min.js"></script>
   <script src="vendor/qrcode.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

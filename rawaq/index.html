@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#ffffff">
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="رواق — مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
@@ -10,6 +10,7 @@
   <meta property="og:description" content="مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
   <meta property="og:type" content="website">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="رواق">
   <title>رواق</title>
@@ -560,6 +561,10 @@
         <button type="button" role="menuitem" data-act="copy">
           <span>نسخ النص</span>
           <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="unsend" class="danger">
+          <span>حذف لدى الجميع</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/><path d="m9.5 11.5 5 5M14.5 11.5l-5 5"/></svg>
         </button>
         <button type="button" role="menuitem" data-act="delete" class="danger">
           <span>حذف عندي</span>

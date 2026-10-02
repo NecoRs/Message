@@ -388,6 +388,7 @@
       send(conn, helloMsg());
       setPresence(id, 'online');
       flushOutbox(id);
+      flushUnsend(id);
       flushReceipts(id);
     });
     conn.on('data', (data) => {
@@ -497,6 +498,8 @@
       case 'read': if (Array.isArray(d.ids)) markMine(id, d.ids.slice(0, 2000), 'read'); break;
       case 'typing': setTyping(id, !!d.on); break;
       case 'react': onReact(id, d); break;
+      case 'unsend': onUnsend(id, d); break;
+      case 'unsent': case 'unsend-no': onUnsendReply(id, d); break;
       default: break; // ping / unknown
     }
   }
@@ -999,11 +1002,9 @@
     const wrap = $('#banner-wrap');
     if (!id || isBlocked(id)) { wrap.classList.remove('show'); return; }
     const c = S.contacts[id];
-    const pending = msgsOf(id).some((m) => m.me && m.st === 'pending');
     const p = S.presence.get(id);
     let text = '';
     if (S.net === 'offline') text = 'أنت غير متصل بالإنترنت. رسائلك محفوظة وبتنرسل أول ما يرجع الاتصال.';
-    else if (pending && p !== 'online') text = `${nameOf(c)} غير متصل الآن. رسالتك محفوظة وبتوصله تلقائياً أول ما تكونون متصلين معاً.`;
     else if (!c.name && !msgsOf(id).length && p && p !== 'online' && p !== 'connecting') text = 'ما قدرنا نوصل لهذا المعرّف الحين. تأكد منه، أو اطلب من صاحبه يفتح رواق.';
     if (text) $('#banner-text').textContent = text;
     wrap.classList.toggle('show', !!text);
@@ -1300,8 +1301,8 @@
     row.addEventListener('animationend', () => row.classList.remove('flash'), { once: true });
   }
 
-  function deleteMsg(m) {
-    const id = S.active;
+  function deleteMsg(m, cid) {
+    const id = cid || S.active;
     const list = msgsOf(id);
     const i = list.indexOf(m);
     if (i < 0) return;
@@ -1311,7 +1312,9 @@
     const last = list[list.length - 1];
     if (c) {
       c.last = last ? { text: mediaLabel(last).slice(0, 140), me: last.me, ts: last.ts } : null;
+      if (!m.me && !m.seen && c.unread) c.unread--;
       saveContacts();
+      updateTitle();
     }
     if (S.reply && S.reply.id === m.id) cancelReply();
     const up = uploads.get(m.id);
@@ -1320,13 +1323,71 @@
       if (up.preview) setTimeout(() => URL.revokeObjectURL(up.preview), 1000);
       uploads.delete(m.id);
     }
+    if (S.active !== id) { renderList(); return; }
     const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
-    const rerender = () => renderMessages(null, true);
+    const rerender = () => { if (S.active === id) renderMessages(null, true); };
     if (row) {
       row.classList.add('leave');
       setTimeout(rerender, 280);
     } else rerender();
     renderList();
+  }
+
+  // ---------------------------------------------------------------- delete for everyone
+
+  // Allowed only while the other side hasn't read the message. Requests wait in a
+  // queue until the other side confirms, and the receiver refuses if it was already read.
+  const unsendQ = store.get('unsend', {}) || {}; // chatId -> [{ id, m }]
+  const saveUnsendQ = () => store.set('unsend', unsendQ);
+
+  function unsendMsg(m) {
+    const cid = S.active;
+    if (!cid || !m.me || m.st === 'read') return;
+    const delivered = m.st === 'delivered';
+    deleteMsg(m, cid); // never-delivered messages just leave the outbox
+    if (!delivered) { toast('تم حذف الرسالة لدى الجميع', { icon: 'check' }); return; }
+    const copy = Object.assign({}, m);
+    delete copy.rxp;
+    (unsendQ[cid] = unsendQ[cid] || []).push({ id: m.id, m: copy });
+    saveUnsendQ();
+    flushUnsend(cid);
+    toast('تم حذف الرسالة لدى الجميع', { icon: 'check' });
+  }
+
+  function flushUnsend(cid) {
+    const q = unsendQ[cid];
+    if (!q || !q.length) return;
+    for (const item of q) if (!sendTo(cid, { t: 'unsend', id: item.id })) break;
+  }
+
+  function onUnsend(cid, d) {
+    if (typeof d.id !== 'string') return;
+    const m = findMsg(cid, d.id);
+    if (!m) { sendTo(cid, { t: 'unsent', id: d.id }); return; } // already gone
+    if (m.me) return;                                            // only the sender may unsend
+    if (m.seen) { sendTo(cid, { t: 'unsend-no', id: d.id }); return; }
+    deleteMsg(m, cid);
+    sendTo(cid, { t: 'unsent', id: d.id });
+  }
+
+  function onUnsendReply(cid, d) {
+    const q = unsendQ[cid];
+    if (!q || typeof d.id !== 'string') return;
+    const i = q.findIndex((x) => x.id === d.id);
+    if (i < 0) return;
+    const [item] = q.splice(i, 1);
+    if (!q.length) delete unsendQ[cid];
+    saveUnsendQ();
+    if (d.t !== 'unsend-no' || !item.m) return;
+    // it was read before the request arrived: put it back where it was
+    const list = msgsOf(cid);
+    if (list.some((x) => x.id === item.id)) return;
+    item.m.st = 'read';
+    const at = list.findIndex((x) => x.ts > item.m.ts);
+    if (at < 0) list.push(item.m); else list.splice(at, 0, item.m);
+    saveMsgs(cid);
+    if (S.active === cid) renderMessages(null, true);
+    toast(`ما انحذفت عند ${nameOf(S.contacts[cid])} لأنه قرأها`, { icon: 'alert', ms: 4000 });
   }
 
   // ---------------------------------------------------------------- message menu
@@ -1336,9 +1397,12 @@
   let ctxMsg = null;
   let heldRow = null;
 
-  function openCtx(m, row) {
+  let ctxHold = false; // true from a long-press until the finger has lifted
+  function openCtx(m, row, byTouch) {
     if (!S.active) return;
     closeCtx(true);
+    ctxHold = !!byTouch;
+    ctxScroll = scroller.scrollTop;
     ctxMsg = m;
     heldRow = row;
     const rr = $('#ctx-reacts');
@@ -1352,6 +1416,7 @@
       rr.appendChild(b);
     });
     $('[data-act="copy"]', ctxCard).hidden = !m.text;
+    $('[data-act="unsend"]', ctxCard).hidden = !(m.me && m.st !== 'read' && !isBlocked(S.active));
     ctx.hidden = false;
     row.classList.add('held');
 
@@ -1385,7 +1450,14 @@
     else setTimeout(() => { if (!ctx.classList.contains('open')) ctx.hidden = true; }, 260);
   }
 
+  // the click synthesised from lifting the finger lands on whatever is under it
+  // (usually the backdrop); swallow it so the menu stays open
+  const releaseHold = () => { if (ctxHold) setTimeout(() => { ctxHold = false; }, 350); };
+  window.addEventListener('touchend', releaseHold, true);
+  window.addEventListener('pointerup', releaseHold, true);
+  window.addEventListener('pointercancel', releaseHold, true);
   ctx.addEventListener('click', async (e) => {
+    if (ctxHold) { e.preventDefault(); e.stopPropagation(); return; }
     if (e.target.closest('[data-ctx-close]')) { closeCtx(); return; }
     const act = e.target.closest('[data-act]');
     if (!act || !ctxMsg) return;
@@ -1393,12 +1465,21 @@
     closeCtx();
     if (act.dataset.act === 'reply') startReply(m);
     else if (act.dataset.act === 'copy') copyText(m.text, 'تم نسخ الرسالة');
+    else if (act.dataset.act === 'unsend') {
+      if (m.st === 'read') { toast('ما تقدر تحذفها لدى الجميع — انقرأت', { icon: 'alert' }); return; }
+      const ok = await confirmBox('حذف لدى الجميع؟', 'بتنحذف من عندك ومن عنده، لأنه ما قرأها للحين.', 'حذف لدى الجميع');
+      if (ok) unsendMsg(m);
+    }
     else if (act.dataset.act === 'delete') {
       const ok = await confirmBox('حذف الرسالة؟', 'بتنحذف من جهازك فقط، وتبقى عند الطرف الثاني.', 'حذف');
       if (ok) deleteMsg(m);
     }
   });
-  scroller.addEventListener('scroll', () => closeCtx(), { passive: true });
+  // close on a real scroll only: momentum from an earlier swipe must not snap it shut
+  let ctxScroll = 0;
+  scroller.addEventListener('scroll', () => {
+    if (!ctx.hidden && Math.abs(scroller.scrollTop - ctxScroll) > 24) closeCtx();
+  }, { passive: true });
 
   const msgOfRow = (row) => (row && S.active ? findMsg(S.active, row.dataset.id) : null);
 
@@ -1450,7 +1531,7 @@
       if (!m) return;
       suppressClick = true;
       setTimeout(() => { suppressClick = false; }, 800);
-      openCtx(m, row);
+      openCtx(m, row, true);
     }, 430);
     gesture = g;
   });
@@ -2746,6 +2827,17 @@
     // refresh relative times ("today", "last seen") once a minute
     setInterval(() => { renderList(); if (S.active) renderChatHead(); }, 60000);
   }
+
+  // ---------------------------------------------------------------- no zoom on phones
+
+  // iOS Safari ignores user-scalable=no, so block its pinch gestures directly.
+  // Double-tap zoom is turned off with touch-action: manipulation in CSS.
+  for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
 
   // ---------------------------------------------------------------- boot
 

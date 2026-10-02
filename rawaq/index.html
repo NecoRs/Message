@@ -129,7 +129,7 @@
           </form>
           <p class="fineprint" style="--i:4">
             <svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-            <span>بلا رقم جوال ولا بريد — اسمك يكفي.</span>
+            <span>الرسائل مشفّرة بين الطرفين</span>
           </p>
         </div>
       </div>
@@ -142,7 +142,7 @@
           <p class="eyebrow" style="--i:0">أهلاً، <span id="id-hello" dir="auto"></span></p>
           <h2 class="title" id="id-title" style="--i:1">هذا معرّفك في رواق</h2>
           <div class="id-code" id="id-code" style="--i:2" dir="ltr"></div>
-          <p class="muted" style="--i:3">أرسله لمن تحب يتواصل معك، أو اطلب معرّفه وأضفه أنت.</p>
+          <p class="muted" style="--i:3">شارك معرّفك ليتواصلوا معك</p>
           <div class="row" style="--i:4">
             <button class="btn btn-soft" type="button" data-copy-id>
               <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
@@ -212,7 +212,7 @@
 
         <div class="notif-card" id="notif-card" hidden>
           <svg class="i" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 21h4"/></svg>
-          <span>فعّل التنبيهات عشان توصلك الرسائل وأنت مسكّر رواق.</span>
+          <span>فعّل التنبيهات</span>
           <button class="btn btn-primary" type="button" id="notif-on">تفعيل</button>
           <button class="icon-btn ghost" type="button" id="notif-x" aria-label="لاحقاً">
             <svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
@@ -225,12 +225,11 @@
           <div class="empty" id="list-empty" hidden>
             <svg class="empty-art" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
             <b>لا توجد محادثات بعد</b>
-            <p>شارك معرّفك مع من تحب، أو اضغط «محادثة جديدة» وأضف معرّفه.</p>
+            <p>ابدأ محادثة جديدة بمعرّف صديقك</p>
           </div>
           <div class="empty empty-sm" id="search-empty" hidden>
             <b>لا توجد نتائج</b>
-            <p>جرّب اسماً آخر أو جزءاً من المعرّف.</p>
-          </div>
+                      </div>
         </div>
 
         <button class="fab" id="btn-new" type="button">
@@ -243,7 +242,7 @@
         <div class="chat-empty" id="chat-empty">
           <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
           <b>اختر محادثة</b>
-          <p>أو ابدأ واحدة جديدة بمعرّف صديقك.</p>
+          <p>أو ابدأ محادثة جديدة</p>
         </div>
 
         <div class="chat-pane" id="chat-pane" hidden>
@@ -352,7 +351,7 @@
               </div>
               <div class="pf-row pf-verified" id="pf-verified" hidden>
                 <span class="pf-row-label">التوثيق</span>
-                <span class="pf-v"><svg class="vbadge-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg> حساب موثّق رسمياً في رواق</span>
+                <span class="pf-v"><svg class="vbadge-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg> حساب موثّق</span>
               </div>
             </div>
           </div>
@@ -370,7 +369,7 @@
             <path pathLength="1" d="M5 36h38"/>
           </svg>
           <h2 class="title" style="--i:1">رواق مفتوح في نافذة أخرى</h2>
-          <p class="muted" style="--i:2">تقدر تستخدم رواق في نافذة واحدة فقط بنفس الوقت.</p>
+          <p class="muted" style="--i:2">نافذة واحدة فقط بنفس الوقت</p>
           <button class="btn btn-primary btn-block" type="button" id="btn-takeover" style="--i:3">استخدمه هنا</button>
         </div>
       </div>
@@ -388,8 +387,7 @@
           <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </div>
-      <p class="muted">اكتب معرّف الشخص اللي تبي تكلّمه، أو الصق رابط دعوته.</p>
-      <div class="id-field">
+            <div class="id-field">
         <label class="sr-only" for="in-peer">معرّف صديقك</label>
         <input class="input input-lg id-input" id="in-peer" dir="ltr" maxlength="80" placeholder="K7M2QX" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go">
         <button class="paste" id="btn-paste" type="button">لصق</button>
@@ -482,18 +480,12 @@
       </button>
       <button class="row-btn danger" id="btn-reset" type="button">
         <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
-        <span>حذف بياناتي من هذا الجهاز</span>
+        <span>حذف بياناتي</span>
       </button>
-
-      <div class="row-btn row-static">
-        <svg class="i" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5Z"/></svg>
-        <span>التوصيل والطرف الثاني مسكّر</span>
-        <span class="row-btn-state" id="mb-state">غير مفعّل</span>
-      </div>
 
       <p class="fineprint">
         <svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-        <span>رسائلك محفوظة في جهازك فقط، وتنتقل مباشرة ومشفّرة بينك وبين الطرف الثاني.</span>
+        <span>الرسائل مشفّرة بين الطرفين</span>
       </p>
     </div>
   </div>
@@ -537,7 +529,7 @@
         </button>
       </div>
       <ul class="blocked-list" id="blocked-list"></ul>
-      <p class="muted blocked-empty" id="blocked-empty">ما حظرت أحد.</p>
+      <p class="muted blocked-empty" id="blocked-empty">لا يوجد</p>
     </div>
   </div>
 
@@ -561,10 +553,6 @@
           <svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
         </button>
       </div>
-      <p class="fineprint media-note">
-        <svg class="i" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5Z"/></svg>
-        <span>الصور والفيديوهات تنرفع لتخزين سحابي، والرسالة تحمل رابطها فقط.</span>
-      </p>
     </form>
   </div>
 
@@ -608,8 +596,7 @@
         <div class="qr" id="qr" role="img" aria-label="رمز QR لرابط دعوتك"></div>
         <b class="mono qr-id" dir="ltr" data-my-id></b>
       </div>
-      <p class="muted qr-hint">خلّ صديقك يصوّره بكاميرا جواله، وتنفتح له المحادثة معك مباشرة.</p>
-      <div class="row">
+            <div class="row">
         <button class="btn btn-soft" type="button" data-copy-id>نسخ المعرّف</button>
         <button class="btn btn-primary" type="button" data-share>مشاركة الرابط</button>
       </div>

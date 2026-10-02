@@ -14,6 +14,8 @@
   <meta name="apple-mobile-web-app-title" content="رواق">
   <title>رواق</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a0a0a'/%3E%3Cpath d='M14 46V30a9 9 0 0 1 18 0v16M32 46V30a9 9 0 0 1 18 0v16M10 46h44' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Reem+Kufi:wght@500;600&display=swap">
@@ -126,8 +128,20 @@
           <button class="icon-btn ghost" type="button" data-copy-id aria-label="نسخ المعرّف">
             <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
           </button>
+          <button class="icon-btn ghost" type="button" data-qr aria-label="رمز QR لمعرّفك">
+            <svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 19.5h1.5M19.5 14v1.5"/></svg>
+          </button>
           <button class="icon-btn ghost" type="button" data-share aria-label="مشاركة رابط الدعوة">
             <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
+          </button>
+        </div>
+
+        <div class="search" id="search-box" hidden>
+          <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          <label class="sr-only" for="q">ابحث في المحادثات</label>
+          <input id="q" type="search" placeholder="ابحث في المحادثات" autocomplete="off" dir="auto" enterkeyhint="search">
+          <button class="search-x" id="q-x" type="button" aria-label="مسح البحث" hidden>
+            <svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
           </button>
         </div>
 
@@ -138,6 +152,10 @@
             <svg class="empty-art" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
             <b>لا توجد محادثات بعد</b>
             <p>شارك معرّفك مع من تحب، أو اضغط «محادثة جديدة» وأضف معرّفه.</p>
+          </div>
+          <div class="empty empty-sm" id="search-empty" hidden>
+            <b>لا توجد نتائج</b>
+            <p>جرّب اسماً آخر أو جزءاً من المعرّف.</p>
           </div>
         </div>
 
@@ -191,7 +209,25 @@
           </button>
 
           <form class="composer" id="composer">
+            <div class="reply-wrap" id="reply-wrap">
+              <div class="reply-clip">
+                <div class="reply-bar">
+                  <svg class="i" viewBox="0 0 24 24"><path d="M10 8 5 12l5 4"/><path d="M5 12h9a5 5 0 0 1 5 5v1"/></svg>
+                  <div class="reply-body">
+                    <b id="reply-name"></b>
+                    <span id="reply-text" dir="auto"></span>
+                  </div>
+                  <button class="icon-btn ghost" id="reply-x" type="button" aria-label="إلغاء الرد">
+                    <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
             <div class="composer-box">
+              <button class="attach" id="btn-attach" type="button" aria-label="إرسال صورة أو فيديو">
+                <svg class="i" viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
+              </button>
+              <input type="file" id="in-media" accept="image/*,video/*" hidden>
               <label class="sr-only" for="input">رسالتك</label>
               <textarea id="input" rows="1" placeholder="اكتب رسالة…" maxlength="2000" dir="auto" enterkeyhint="send"></textarea>
               <button class="send" id="send" type="submit" aria-label="إرسال" disabled>
@@ -199,6 +235,14 @@
               </button>
             </div>
           </form>
+          <div class="blocked-bar" id="blocked-bar" hidden>
+            <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+            <span id="blocked-text"></span>
+            <button class="btn btn-soft" type="button" id="btn-unblock-inline">إلغاء الحظر</button>
+          </div>
+          <div class="drop-zone" id="drop-zone" aria-hidden="true">
+            <div><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><b>أفلت الصورة أو الفيديو هنا</b></div>
+          </div>
         </div>
       </main>
     </section>
@@ -261,7 +305,12 @@
       </div>
 
       <div class="profile-top">
-        <span class="avatar xl" id="p-avatar"></span>
+        <button class="photo-pick" id="btn-photo" type="button" aria-label="تغيير صورة البروفايل">
+          <span class="avatar xl" id="p-avatar"></span>
+          <span class="photo-badge"><svg class="i" viewBox="0 0 24 24"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.8l1.4-2h4.6l1.4 2h1.8A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5Z"/><circle cx="12" cy="12.5" r="3.5"/></svg></span>
+        </button>
+        <button class="link-btn" id="btn-photo-remove" type="button" hidden>إزالة الصورة</button>
+        <input type="file" id="in-photo" accept="image/*" hidden>
       </div>
 
       <form class="field-group" id="f-rename" novalidate>
@@ -278,6 +327,9 @@
           <b class="mono" dir="ltr" data-my-id></b>
           <button class="icon-btn" type="button" data-copy-id aria-label="نسخ المعرّف">
             <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+          </button>
+          <button class="icon-btn" type="button" data-qr aria-label="رمز QR لمعرّفك">
+            <svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 19.5h1.5M19.5 14v1.5"/></svg>
           </button>
           <button class="icon-btn" type="button" data-share aria-label="مشاركة رابط الدعوة">
             <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
@@ -299,6 +351,21 @@
         <svg class="i" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 21h4"/></svg>
         <span>تنبيهات الرسائل</span>
         <span class="row-btn-state" id="notify-state"></span>
+      </button>
+      <button class="row-btn" id="btn-sound" type="button" role="switch" aria-checked="true">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5Z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
+        <span>صوت الرسائل</span>
+        <span class="switch" aria-hidden="true"><i></i></span>
+      </button>
+      <button class="row-btn" id="btn-install" type="button" hidden>
+        <svg class="i" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10.5 18.5h3"/></svg>
+        <span>ثبّت رواق كتطبيق</span>
+        <span class="row-btn-state" id="install-state"></span>
+      </button>
+      <button class="row-btn" id="btn-blocked" type="button">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+        <span>المحظورون</span>
+        <span class="row-btn-state" id="blocked-count"></span>
       </button>
       <button class="row-btn danger" id="btn-reset" type="button">
         <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
@@ -328,10 +395,68 @@
         <span>نسخ معرّفه</span>
         <b class="row-btn-state mono" dir="ltr" id="m-chat-id"></b>
       </button>
+      <button class="row-btn" id="btn-block" type="button">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+        <span id="btn-block-label">حظر المستخدم</span>
+      </button>
       <button class="row-btn danger" id="btn-delete-chat" type="button">
         <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
         <span>حذف المحادثة</span>
       </button>
+    </div>
+  </div>
+
+  <!-- Blocked users -->
+  <div class="modal" id="m-blocked" role="dialog" aria-modal="true" aria-labelledby="m-blocked-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet sheet-sm">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-blocked-title">المحظورون</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <ul class="blocked-list" id="blocked-list"></ul>
+      <p class="muted blocked-empty" id="blocked-empty">ما حظرت أحد.</p>
+    </div>
+  </div>
+
+  <!-- Media preview before sending -->
+  <div class="modal" id="m-media" role="dialog" aria-modal="true" aria-labelledby="m-media-title" hidden>
+    <div class="backdrop" data-close></div>
+    <form class="sheet" id="f-media" novalidate>
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-media-title">إرسال</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="media-preview" id="media-preview"></div>
+      <p class="muted media-info" id="media-info"></p>
+      <div class="row-input">
+        <label class="sr-only" for="in-caption">تعليق</label>
+        <input class="input" id="in-caption" maxlength="1000" placeholder="أضف تعليقاً (اختياري)" dir="auto" autocomplete="off" enterkeyhint="send">
+        <button class="send send-lg" type="submit" aria-label="إرسال">
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
+        </button>
+      </div>
+      <p class="fineprint media-note">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5Z"/></svg>
+        <span>الصور والفيديوهات تنرفع لتخزين سحابي، والرسالة تحمل رابطها فقط.</span>
+      </p>
+    </form>
+  </div>
+
+  <!-- Full-screen media viewer -->
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="عرض الوسائط" hidden>
+    <div class="viewer-stage" id="viewer-stage"></div>
+    <div class="viewer-bar">
+      <button class="icon-btn" id="viewer-close" type="button" aria-label="إغلاق">
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <span class="viewer-caption" id="viewer-caption" dir="auto"></span>
     </div>
   </div>
 
@@ -349,11 +474,58 @@
     </div>
   </div>
 
+  <!-- QR -->
+  <div class="modal" id="m-qr" role="dialog" aria-modal="true" aria-labelledby="m-qr-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet sheet-sm qr-sheet">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-qr-title">رمز معرّفك</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="qr-card">
+        <div class="qr" id="qr" role="img" aria-label="رمز QR لرابط دعوتك"></div>
+        <b class="mono qr-id" dir="ltr" data-my-id></b>
+      </div>
+      <p class="muted qr-hint">خلّ صديقك يصوّره بكاميرا جواله، وتنفتح له المحادثة معك مباشرة.</p>
+      <div class="row">
+        <button class="btn btn-soft" type="button" data-copy-id>نسخ المعرّف</button>
+        <button class="btn btn-primary" type="button" data-share>مشاركة الرابط</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Message menu -->
+  <div class="ctx" id="ctx" hidden>
+    <div class="ctx-backdrop" data-ctx-close></div>
+    <div class="ctx-card" id="ctx-card" role="menu" aria-label="خيارات الرسالة">
+      <div class="ctx-reacts" id="ctx-reacts"></div>
+      <div class="ctx-list">
+        <button type="button" role="menuitem" data-act="reply">
+          <span>رد</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="M10 8 5 12l5 4"/><path d="M5 12h9a5 5 0 0 1 5 5v1"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="copy">
+          <span>نسخ النص</span>
+          <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="delete" class="danger">
+          <span>حذف عندي</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <noscript><p class="noscript">رواق يحتاج تفعيل JavaScript.</p></noscript>
 
   <script src="vendor/peerjs.min.js"></script>
+  <script src="vendor/qrcode.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

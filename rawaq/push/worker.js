@@ -6,7 +6,7 @@
  * التطبيق نفسه يعرض «وصلتك رسالة جديدة»، فما يمر أي نص رسالة من هنا.
  *
  * متغيرات البيئة (Settings ← Variables):
- *   DB_URL             رابط Firebase Realtime Database (نفس اللي في config.js)
+ *   DB_URL             اسم قاعدة Firebase (مثل rawaq-b78a7-default-rtdb) أو رابطها الكامل
  *   VAPID_PUBLIC       المفتاح العام (من tools/vapid.html)
  *   VAPID_PRIVATE_JWK  المفتاح الخاص — كـ Secret (مشفّر)، لا تحطه في أي مكان ثاني
  *   VAPID_SUBJECT      اختياري: رابط موقعك أو mailto:بريدك
@@ -35,7 +35,8 @@ export default {
     try { ({ to } = JSON.parse(await request.text())); } catch (_) { return reply(400, { error: 'bad json' }); }
     if (typeof to !== 'string' || !ID_RE.test(to)) return reply(400, { error: 'bad id' });
 
-    const db = env.DB_URL.replace(/\/+$/, '');
+    const db = await resolveDb(env.DB_URL.trim());
+    if (!db) return reply(500, { error: 'database not reachable' });
     const sub = await (await fetch(`${db}/push/${to}.json`)).json().catch(() => null);
     if (!sub || typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://')) return reply(200, { sent: false });
 
@@ -55,6 +56,23 @@ export default {
     return reply(200, { sent: res.ok, status: res.status });
   },
 };
+
+// DB_URL may be just the instance name: the REST host depends on the region,
+// so try each Realtime Database region once and keep the one that answers.
+const HOSTS = ['firebaseio.com', 'europe-west1.firebasedatabase.app', 'asia-southeast1.firebasedatabase.app'];
+let dbCache = '';
+async function resolveDb(v) {
+  if (/^https:\/\//.test(v)) return v.replace(/\/+$/, '');
+  if (dbCache) return dbCache;
+  if (!/^[a-z0-9-]{3,63}$/.test(v)) return '';
+  for (const h of HOSTS) {
+    const u = `https://${v}.${h}`;
+    try {
+      if ((await fetch(`${u}/keys.json?shallow=true`)).ok) { dbCache = u; return u; }
+    } catch (_) { /* next region */ }
+  }
+  return '';
+}
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const enc = (obj) => b64url(new TextEncoder().encode(JSON.stringify(obj)));

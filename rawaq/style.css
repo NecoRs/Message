@@ -993,6 +993,9 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .row-btn:active { transform: scale(.985); }
 .row-btn > span:not(.row-btn-state):not(.switch) { flex: 1; }
 .row-btn-state { color: var(--muted); font-size: 13px; font-weight: 500; }
+.row-static { cursor: default; }
+.row-static:hover, .row-static:active { background: var(--bg-2); transform: none; }
+#mb-state[data-state="on"] { color: var(--fg); }
 .row-btn.danger { background: transparent; }
 .row-btn.danger:hover { background: var(--bg-2); }
 .sheet .fineprint { margin-top: 0; text-align: start; justify-content: flex-start; align-items: flex-start; }

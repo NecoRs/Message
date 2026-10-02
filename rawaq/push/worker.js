@@ -68,7 +68,8 @@ async function resolveDb(v) {
   for (const h of HOSTS) {
     const u = `https://${v}.${h}`;
     try {
-      if ((await fetch(`${u}/keys.json?shallow=true`)).ok) { dbCache = u; return u; }
+      const r = await fetch(`${u}/keys/PROBE.json`); // readable under the rules; 401 still proves the host
+      if (r.ok || r.status === 401) { dbCache = u; return u; }
     } catch (_) { /* next region */ }
   }
   return '';

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="رواق — مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
+  <meta property="og:title" content="رواق">
+  <meta property="og:description" content="مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
+  <meta property="og:type" content="website">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="رواق">
+  <title>رواق</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a0a0a'/%3E%3Cpath d='M14 46V30a9 9 0 0 1 18 0v16M32 46V30a9 9 0 0 1 18 0v16M10 46h44' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Reem+Kufi:wght@500;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    /* Apply the saved theme before first paint to avoid a flash. */
+    try {
+      var t = JSON.parse(localStorage.getItem('rawaq.theme') || '"auto"');
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="arch" viewBox="0 0 48 48">
+        <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
+        <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
+        <path pathLength="1" d="M5 36h38"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="app" id="app">
+
+    <!-- 1. Welcome: pick a name -->
+    <section class="view" id="v-welcome" aria-labelledby="w-title">
+      <div class="center">
+        <div class="welcome reveal">
+          <svg class="mark draw" style="--i:0" viewBox="0 0 48 48" aria-hidden="true">
+            <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
+            <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
+            <path pathLength="1" d="M5 36h38"/>
+          </svg>
+          <h1 class="wordmark" id="w-title" style="--i:1">رواق</h1>
+          <p class="tagline" style="--i:2">مساحة هادئة لحديثك الخاص</p>
+          <form class="stack" id="f-welcome" style="--i:3" novalidate>
+            <label class="sr-only" for="in-name">اسمك</label>
+            <input class="input input-lg" id="in-name" maxlength="30" placeholder="اكتب اسمك" autocomplete="nickname" enterkeyhint="go" dir="auto">
+            <p class="field-error" id="welcome-err" role="alert"></p>
+            <button class="btn btn-primary btn-block" type="submit">
+              <span>ادخل</span>
+              <svg class="i" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+            </button>
+          </form>
+          <p class="fineprint" style="--i:4">
+            <svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <span>بلا رقم جوال ولا بريد — اسمك يكفي.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Your ID -->
+    <section class="view" id="v-id" aria-labelledby="id-title">
+      <div class="center">
+        <div class="welcome reveal">
+          <p class="eyebrow" style="--i:0">أهلاً، <span id="id-hello" dir="auto"></span></p>
+          <h2 class="title" id="id-title" style="--i:1">هذا معرّفك في رواق</h2>
+          <div class="id-code" id="id-code" style="--i:2" dir="ltr"></div>
+          <p class="muted" style="--i:3">أرسله لمن تحب يتواصل معك، أو اطلب معرّفه وأضفه أنت.</p>
+          <div class="row" style="--i:4">
+            <button class="btn btn-soft" type="button" data-copy-id>
+              <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+              <span>نسخ المعرّف</span>
+            </button>
+            <button class="btn btn-soft" type="button" data-share>
+              <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
+              <span>مشاركة الرابط</span>
+            </button>
+          </div>
+          <button class="btn btn-primary btn-block" type="button" id="btn-enter" style="--i:5">
+            <span>ابدأ المحادثات</span>
+            <svg class="i" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Main: conversations + chat -->
+    <section class="view main" id="v-main">
+      <aside class="sidebar" aria-label="المحادثات">
+        <header class="side-head">
+          <div class="brand">
+            <span class="brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg></span>
+            <div class="brand-text">
+              <b>رواق</b>
+              <button class="net" id="net" type="button" data-state="idle" title="حالة الاتصال">
+                <i></i><span id="net-text">…</span>
+              </button>
+            </div>
+          </div>
+          <div class="head-actions">
+            <button class="icon-btn" id="btn-theme" type="button" aria-label="تبديل المظهر">
+              <svg class="i t-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+              <svg class="i t-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            </button>
+            <button class="avatar-btn" id="btn-me" type="button" aria-label="حسابك">
+              <span class="avatar sm" id="me-avatar"></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="me-card">
+          <button class="me-card-main" type="button" data-copy-id aria-label="نسخ معرّفك">
+            <span class="me-card-label">معرّفك</span>
+            <b class="me-card-id" dir="ltr" data-my-id></b>
+          </button>
+          <button class="icon-btn ghost" type="button" data-copy-id aria-label="نسخ المعرّف">
+            <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+          </button>
+          <button class="icon-btn ghost" type="button" data-share aria-label="مشاركة رابط الدعوة">
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
+          </button>
+        </div>
+
+        <h2 class="list-title">المحادثات</h2>
+        <div class="list-wrap">
+          <ul class="list" id="list"></ul>
+          <div class="empty" id="list-empty" hidden>
+            <svg class="empty-art" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
+            <b>لا توجد محادثات بعد</b>
+            <p>شارك معرّفك مع من تحب، أو اضغط «محادثة جديدة» وأضف معرّفه.</p>
+          </div>
+        </div>
+
+        <button class="fab" id="btn-new" type="button">
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>محادثة جديدة</span>
+        </button>
+      </aside>
+
+      <main class="chat" id="chat">
+        <div class="chat-empty" id="chat-empty">
+          <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
+          <b>اختر محادثة</b>
+          <p>أو ابدأ واحدة جديدة بمعرّف صديقك.</p>
+        </div>
+
+        <div class="chat-pane" id="chat-pane" hidden>
+          <header class="chat-head">
+            <button class="icon-btn ghost back" id="btn-back" type="button" aria-label="رجوع">
+              <svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+            </button>
+            <span class="avatar" id="c-avatar"><i class="dot"></i></span>
+            <div class="chat-who">
+              <b id="c-name" dir="auto"></b>
+              <span class="status" id="c-status"></span>
+            </div>
+            <button class="icon-btn ghost" id="btn-chat-menu" type="button" aria-label="خيارات المحادثة">
+              <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg>
+            </button>
+          </header>
+
+          <div class="banner-wrap" id="banner-wrap">
+            <div class="banner-clip">
+              <div class="banner">
+                <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+                <span id="banner-text"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="scroller" id="scroller">
+            <div class="messages" id="messages" role="log" aria-live="polite"></div>
+            <div class="typing-row" id="typing" aria-hidden="true">
+              <div class="bubble typing"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+
+          <button class="jump" id="jump" type="button" aria-label="آخر الرسائل">
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+            <span class="jump-n" id="jump-n"></span>
+          </button>
+
+          <form class="composer" id="composer">
+            <div class="composer-box">
+              <label class="sr-only" for="input">رسالتك</label>
+              <textarea id="input" rows="1" placeholder="اكتب رسالة…" maxlength="2000" dir="auto" enterkeyhint="send"></textarea>
+              <button class="send" id="send" type="submit" aria-label="إرسال" disabled>
+                <svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+    </section>
+
+    <!-- Opened in another tab -->
+    <section class="view" id="v-blocked">
+      <div class="center">
+        <div class="welcome reveal">
+          <svg class="mark draw" style="--i:0" viewBox="0 0 48 48" aria-hidden="true">
+            <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
+            <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
+            <path pathLength="1" d="M5 36h38"/>
+          </svg>
+          <h2 class="title" style="--i:1">رواق مفتوح في نافذة أخرى</h2>
+          <p class="muted" style="--i:2">تقدر تستخدم رواق في نافذة واحدة فقط بنفس الوقت.</p>
+          <button class="btn btn-primary btn-block" type="button" id="btn-takeover" style="--i:3">استخدمه هنا</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- New chat -->
+  <div class="modal" id="m-new" role="dialog" aria-modal="true" aria-labelledby="m-new-title" hidden>
+    <div class="backdrop" data-close></div>
+    <form class="sheet" id="f-new" novalidate>
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-new-title">محادثة جديدة</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <p class="muted">اكتب معرّف الشخص اللي تبي تكلّمه، أو الصق رابط دعوته.</p>
+      <div class="id-field">
+        <label class="sr-only" for="in-peer">معرّف صديقك</label>
+        <input class="input input-lg id-input" id="in-peer" dir="ltr" maxlength="80" placeholder="K7M2QX" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go">
+        <button class="paste" id="btn-paste" type="button">لصق</button>
+      </div>
+      <p class="field-error" id="new-err" role="alert"></p>
+      <button class="btn btn-primary btn-block" type="submit">ابدأ المحادثة</button>
+      <div class="divider"><span>أو</span></div>
+      <button class="btn btn-soft btn-block" type="button" data-share>
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
+        <span>شارك معرّفك</span>
+        <b class="mono" dir="ltr" data-my-id></b>
+      </button>
+    </form>
+  </div>
+
+  <!-- Profile -->
+  <div class="modal" id="m-me" role="dialog" aria-modal="true" aria-labelledby="m-me-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-me-title">حسابك</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="profile-top">
+        <span class="avatar xl" id="p-avatar"></span>
+      </div>
+
+      <form class="field-group" id="f-rename" novalidate>
+        <label class="label" for="in-rename">الاسم</label>
+        <div class="row-input">
+          <input class="input" id="in-rename" maxlength="30" dir="auto" autocomplete="nickname">
+          <button class="btn btn-soft" type="submit">حفظ</button>
+        </div>
+      </form>
+
+      <div class="field-group">
+        <span class="label">معرّفك</span>
+        <div class="id-box">
+          <b class="mono" dir="ltr" data-my-id></b>
+          <button class="icon-btn" type="button" data-copy-id aria-label="نسخ المعرّف">
+            <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+          </button>
+          <button class="icon-btn" type="button" data-share aria-label="مشاركة رابط الدعوة">
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <span class="label" id="theme-label">المظهر</span>
+        <div class="segmented" id="seg-theme" role="radiogroup" aria-labelledby="theme-label">
+          <span class="seg-pill"></span>
+          <button type="button" role="radio" data-theme-opt="light">فاتح</button>
+          <button type="button" role="radio" data-theme-opt="auto">تلقائي</button>
+          <button type="button" role="radio" data-theme-opt="dark">داكن</button>
+        </div>
+      </div>
+
+      <button class="row-btn" id="btn-notify" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 21h4"/></svg>
+        <span>تنبيهات الرسائل</span>
+        <span class="row-btn-state" id="notify-state"></span>
+      </button>
+      <button class="row-btn danger" id="btn-reset" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+        <span>حذف بياناتي من هذا الجهاز</span>
+      </button>
+
+      <p class="fineprint">
+        <svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        <span>رسائلك محفوظة في جهازك فقط، وتنتقل مباشرة ومشفّرة بينك وبين الطرف الثاني.</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- Chat options -->
+  <div class="modal" id="m-chat" role="dialog" aria-modal="true" aria-labelledby="m-chat-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet sheet-sm">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-chat-title" dir="auto"></h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق">
+          <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <button class="row-btn" id="btn-copy-peer" type="button">
+        <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+        <span>نسخ معرّفه</span>
+        <b class="row-btn-state mono" dir="ltr" id="m-chat-id"></b>
+      </button>
+      <button class="row-btn danger" id="btn-delete-chat" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+        <span>حذف المحادثة</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Confirm -->
+  <div class="modal" id="m-confirm" role="alertdialog" aria-modal="true" aria-labelledby="cf-title" aria-describedby="cf-text" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet sheet-sm">
+      <div class="grabber"></div>
+      <h3 class="cf-title" id="cf-title"></h3>
+      <p class="muted" id="cf-text"></p>
+      <div class="row">
+        <button class="btn btn-soft" type="button" data-close>إلغاء</button>
+        <button class="btn btn-primary" type="button" id="cf-ok"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <noscript><p class="noscript">رواق يحتاج تفعيل JavaScript.</p></noscript>
+
+  <script src="vendor/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

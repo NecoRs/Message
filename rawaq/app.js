@@ -15,6 +15,9 @@
     dialTimeout: 12000,    // give up on a connection attempt after this long
     probeEvery: 30000,     // how often to check whether contacts came online
     mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
+    verified: ['QXYWNW'],  // IDs that get the verified badge
+    db: { url: '' },       // Firebase Realtime Database URL: offline delivery mailbox
+    push: { publicKey: '', worker: '' }, // Web Push: VAPID public key + Cloudflare Worker URL
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
   const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
@@ -212,7 +215,7 @@
       c = S.contacts[id] = { id, name: heardNames.get(id) || '', unread: 0, last: null, updated: Date.now(), seen: 0 };
       saveContacts();
       renderList();
-      if (heardPh.get(id)) sendTo(id, { t: 'avatar?' });
+      if (heardPh.get(id)) post(id, { t: 'avatar?' });
     }
     return c;
   }
@@ -255,6 +258,7 @@
     stopped = false;
     setNet(navigator.onLine === false ? 'offline' : 'connecting');
 
+    mbStart();
     const p = new window.Peer(CFG.prefix + S.me.id, Object.assign({ debug: 0 }, CFG.peer));
     peer = p;
 
@@ -283,6 +287,7 @@
   }
 
   function netStop() {
+    mbStop();
     stopped = true;
     clearTimeout(retryTimer);
     retryTimer = 0;
@@ -387,10 +392,13 @@
       send(conn, helloMsg());
       setPresence(id, 'online');
       flushOutbox(id);
+      flushUnsend(id);
       flushReceipts(id);
     });
     conn.on('data', (data) => {
       conn._heard = Date.now();
+      // the other side is closing: drop the link now so new messages use the mailbox
+      if (data && data.t === 'bye') { try { conn.close(); } catch (_) { /* ignore */ } drop(); return; }
       onData(id, data);
     });
     const drop = () => {
@@ -403,11 +411,24 @@
       }
     };
     conn.on('close', drop);
-    conn.on('error', () => { try { conn.close(); } catch (_) { /* ignore */ } drop(); });
+    conn.on('error', (err) => {
+      // an oversized message is rejected by PeerJS but the link itself is fine
+      if (err && err.type === 'message-too-big') return;
+      try { conn.close(); } catch (_) { /* ignore */ }
+      drop();
+    });
   }
 
+  // PeerJS's JSON channel refuses frames of ~16KB or more (and would report an error),
+  // so anything bigger must be split by the caller, like profile photos are.
+  const MAX_FRAME = 15000;
+  const utf8 = new TextEncoder();
   function send(conn, obj) {
-    try { conn.send(obj); return true; } catch (_) { return false; }
+    try {
+      if (utf8.encode(JSON.stringify(obj)).byteLength >= MAX_FRAME) return false;
+      conn.send(obj);
+      return true;
+    } catch (_) { return false; }
   }
   function sendTo(id, obj) {
     const set = conns.get(id);
@@ -432,6 +453,7 @@
     }
   }, 15000);
   setInterval(probeAll, CFG.probeEvery);
+  setInterval(() => retryMailbox(), CFG.probeEvery);
 
   function setPresence(id, p) {
     const prev = S.presence.get(id);
@@ -441,6 +463,252 @@
     if (c && (prev === 'online' || p === 'online')) { c.seen = Date.now(); saveContacts(); }
     renderList();
     if (S.active === id) { renderChatHead(); renderBanner(); }
+  }
+
+  // ---------------------------------------------------------------- offline mailbox
+
+  // When there is no direct link, messages are end-to-end encrypted (ECDH P-256 +
+  // AES-GCM) and dropped into the recipient's inbox on a Firebase Realtime Database.
+  // The recipient streams its inbox, decrypts, handles each item exactly like a
+  // direct message, then deletes it. The server only ever sees ciphertext.
+  // Either an explicit URL, or just the instance name: the URL differs by region, so
+  // try each Realtime Database region and remember the one that answers.
+  const DB_HOSTS = ['firebaseio.com', 'europe-west1.firebasedatabase.app', 'asia-southeast1.firebasedatabase.app'];
+  const dbCandidates = () => {
+    const c = CFG.db || {};
+    if (typeof c.url === 'string' && c.url.trim()) return [c.url.trim().replace(/\/+$/, '')];
+    const inst = typeof c.instance === 'string' ? c.instance.trim() : '';
+    if (!/^[a-z0-9-]{3,63}$/.test(inst)) return [];
+    return DB_HOSTS.map((h) => `https://${inst}.${h}`);
+  };
+  let DB = dbCandidates().length === 1 ? dbCandidates()[0] : '';
+  let dbResolving = null;
+  function resolveDb() {
+    if (DB) return Promise.resolve(DB);
+    const cands = dbCandidates();
+    if (!cands.length) return Promise.resolve('');
+    const cached = store.get('dbUrl', '');
+    if (cached && cands.includes(cached)) { DB = cached; return Promise.resolve(DB); }
+    if (!dbResolving) {
+      dbResolving = (async () => {
+        for (const u of cands) {
+          try {
+            const r = await fetch(`${u}/keys.json?shallow=true`, { cache: 'no-store' });
+            if (r.ok) { store.set('dbUrl', u); DB = u; break; }
+          } catch (_) { /* wrong region or offline: try the next */ }
+        }
+        dbResolving = null;
+        return DB;
+      })();
+    }
+    return dbResolving;
+  }
+  let myKeys = null;              // { priv: CryptoKey, pub: base64 raw public key }
+  let es = null;                  // EventSource on our inbox
+  let published = false;
+  const pubCache = new Map();     // id -> base64 public key
+  const aesCache = new Map();     // id -> AES-GCM CryptoKey shared with that id
+  const mbReady = () => !!(DB && myKeys && S.me && owner && window.crypto && crypto.subtle);
+
+  const b64 = (u8) => { let s2 = ''; for (let i = 0; i < u8.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s2); };
+  const unb64 = (str) => Uint8Array.from(atob(str), (ch) => ch.charCodeAt(0));
+  const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
+
+  async function loadKeys() {
+    if (myKeys || !window.crypto || !crypto.subtle) return myKeys;
+    const saved = store.get('keys', null);
+    try {
+      if (saved && saved.priv && saved.pub) {
+        myKeys = { priv: await crypto.subtle.importKey('jwk', saved.priv, ECDH, false, ['deriveKey']), pub: saved.pub };
+        return myKeys;
+      }
+    } catch (_) { /* regenerate below */ }
+    const kp = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
+    const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+    const pub = b64(new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey)));
+    store.set('keys', { priv: privJwk, pub });
+    myKeys = { priv: await crypto.subtle.importKey('jwk', privJwk, ECDH, false, ['deriveKey']), pub };
+    return myKeys;
+  }
+
+  async function db(method, path, body) {
+    const res = await fetch(`${DB}/${path}.json`, {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body), // no JSON header: keeps POST a simple CORS request
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`db ${res.status}`);
+    return res.json();
+  }
+
+  async function publishKey() {
+    if (published || !mbReady()) return;
+    try {
+      const cur = await db('GET', `keys/${S.me.id}`);
+      if (cur == null) await db('PUT', `keys/${S.me.id}`, myKeys.pub);
+      else if (cur !== myKeys.pub) console.warn('rawaq: a different key is registered for this ID');
+      published = true;
+    } catch (_) { /* retried on the next start */ }
+  }
+
+  async function sharedKey(id) {
+    if (aesCache.has(id)) return aesCache.get(id);
+    let pub = pubCache.get(id);
+    if (!pub) {
+      const v = await db('GET', `keys/${id}`);
+      if (typeof v !== 'string' || v.length > 200) return null; // they haven't opened Rawaq since the mailbox existed
+      pub = v;
+      pubCache.set(id, pub);
+    }
+    const theirs = await crypto.subtle.importKey('raw', unb64(pub), ECDH, false, []);
+    const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: theirs }, myKeys.priv, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    aesCache.set(id, key);
+    return key;
+  }
+
+  async function mailboxSend(to, obj) {
+    if (!mbReady() || !isValidId(to) || isBlocked(to)) return false;
+    try {
+      const key = await sharedKey(to);
+      if (!key) return false;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const payload = { n: S.me.name, ph: S.me.photo ? hashStr(S.me.photo) : '', d: obj };
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8.encode(`${S.me.id}>${to}`) }, key, utf8.encode(JSON.stringify(payload)));
+      await db('POST', `inbox/${to}`, { f: S.me.id, iv: b64(iv), c: b64(new Uint8Array(ct)), t: Date.now() });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const mbBusy = new Set(); // message ids with a mailbox drop in flight
+
+  // Direct link if there is one, otherwise the mailbox.
+  async function post(id, obj) {
+    if (isOpen(id) && sendTo(id, obj)) return true;
+    return mailboxSend(id, obj);
+  }
+
+  // A new or retried message: direct when linked; otherwise mailbox now, link later.
+  function dispatch(id, m) {
+    if (isOpen(id) && sendTo(id, wireMsg(m))) {
+      // a link can look open while the other side has just gone away: if no
+      // delivery receipt comes back soon, drop a copy in the mailbox as well
+      if (mbReady()) setTimeout(() => { if (m.st === 'pending' && !isBlocked(id) && msgsOf(id).includes(m)) mailboxDrop(id, m); }, 4000);
+      return;
+    }
+    dial(id);
+    mailboxDrop(id, m);
+  }
+
+  function mailboxDrop(id, m) {
+    if (mbBusy.has(m.id)) return;
+    mbBusy.add(m.id);
+    mailboxSend(id, wireMsg(m)).then((ok) => {
+      mbBusy.delete(m.id);
+      if (!ok) return;
+      pingPush(id);
+      if (m.st !== 'pending') return;
+      m.st = 'sent';
+      saveMsgs(id);
+      if (S.active === id) updateTick(m);
+    });
+  }
+
+  // Wake the recipient's phone (installed app) through the push worker.
+  // At most once per 15s per person; the notification carries no message text.
+  const pushPinged = new Map();
+  function pingPush(to) {
+    const url = CFG.push && CFG.push.worker;
+    if (!url || !isValidId(to)) return;
+    const now = Date.now();
+    if (now - (pushPinged.get(to) || 0) < 15000) return;
+    pushPinged.set(to, now);
+    fetch(url, { method: 'POST', body: JSON.stringify({ to }), keepalive: true }).catch(() => {});
+  }
+
+  // pending messages whose mailbox drop failed (offline, recipient had no key yet, …)
+  function retryMailbox() {
+    if (!mbReady() || document.visibilityState === 'hidden') return;
+    for (const id of Object.keys(S.contacts)) {
+      if (isOpen(id) || isBlocked(id)) continue;
+      for (const m of msgsOf(id)) if (m.me && m.st === 'pending') dispatch(id, m);
+    }
+  }
+
+  let inboxChain = Promise.resolve();
+  const handledKeys = new Set();
+  async function handleEnvelope(key, v) {
+    if (handledKeys.has(key)) return;
+    handledKeys.add(key);
+    const drop = () => db('DELETE', `inbox/${S.me.id}/${encodeURIComponent(key)}`).catch(() => {});
+    if (!v || typeof v !== 'object' || typeof v.f !== 'string' || typeof v.c !== 'string' || typeof v.iv !== 'string') return drop();
+    const from = v.f;
+    if (!isValidId(from) || from === S.me.id || isBlocked(from) || v.c.length > 600000) return drop();
+    let payload = null;
+    for (let attempt = 0; attempt < 2 && !payload; attempt++) {
+      try {
+        const k = await sharedKey(from);
+        if (!k) break;
+        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(v.iv), additionalData: utf8.encode(`${from}>${S.me.id}`) }, k, unb64(v.c));
+        payload = JSON.parse(new TextDecoder().decode(pt));
+      } catch (_) {
+        aesCache.delete(from); // their key may have changed: refetch once
+        pubCache.delete(from);
+      }
+    }
+    if (payload && typeof payload === 'object' && payload.d && typeof payload.d === 'object') {
+      const name = cleanName(payload.n);
+      if (name) heardNames.set(from, name);
+      const ph = typeof payload.ph === 'string' ? payload.ph.slice(0, 16) : '';
+      heardPh.set(from, ph);
+      const c = S.contacts[from];
+      if (c) {
+        if (name && name !== c.name) { c.name = name; saveContacts(); refreshContact(from); }
+        if (ph && c.ph !== ph && payload.d.t !== 'avatar') post(from, { t: 'avatar?' });
+      }
+      try { onData(from, payload.d); } catch (e) { console.warn('rawaq: inbox item failed', e); }
+    }
+    return drop();
+  }
+
+  function onInboxEvent(ev) {
+    let d;
+    try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (!d || typeof d.path !== 'string') return;
+    const parts = d.path.split('/').filter(Boolean);
+    let items = [];
+    if (parts.length === 0 && d.data && typeof d.data === 'object') items = Object.entries(d.data);
+    else if (parts.length === 1 && d.data) items = [[parts[0], d.data]];
+    items.sort((a, b) => (a[0] < b[0] ? -1 : 1)); // push keys are chronological
+    for (const [k, v] of items) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
+  }
+
+  async function mbStart() {
+    if (es || !S.me || !owner) return;
+    if (!(await resolveDb())) return;
+    try { await loadKeys(); } catch (_) { return; }
+    if (!mbReady() || es) return;
+    publishKey();
+    es = new EventSource(`${DB}/inbox/${S.me.id}.json`);
+    es.addEventListener('put', onInboxEvent);
+    es.addEventListener('patch', (ev) => {
+      let d;
+      try { d = JSON.parse(ev.data); } catch (_) { return; }
+      if (!d || !d.data || typeof d.data !== 'object') return;
+      for (const [k, v] of Object.entries(d.data).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+        if (v) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
+      }
+    });
+    es.addEventListener('cancel', () => mbStop());
+    for (const id of Object.keys(S.contacts)) flushReceipts(id);
+    setTimeout(retryMailbox, 1500);
+    ensurePush();
+    renderNotifCard();
+  }
+
+  function mbStop() {
+    if (es) { es.close(); es = null; }
   }
 
   // ---------------------------------------------------------------- protocol
@@ -468,28 +736,23 @@
         }
         if (c) {
           if (!ph && c.photo) { delete c.photo; delete c.ph; saveContacts(); refreshContact(id); }
-          else if (ph && c.ph !== ph) sendTo(id, { t: 'avatar?' });
+          else if (ph && c.ph !== ph) post(id, { t: 'avatar?' });
         }
         break;
       }
       case 'avatar?':
-        if (S.me.photo) sendTo(id, { t: 'avatar', ph: hashStr(S.me.photo), data: S.me.photo });
+        sendAvatar(id);
         break;
-      case 'avatar': {
-        const c = S.contacts[id];
-        if (!c || typeof d.data !== 'string' || d.data.length > 300000 || !PHOTO_RE.test(d.data)) break;
-        if (hashStr(d.data) !== d.ph) break;
-        c.photo = d.data;
-        c.ph = d.ph;
-        saveContacts();
-        refreshContact(id);
+      case 'avatar':
+        receiveAvatarPart(id, d);
         break;
-      }
       case 'msg': receive(id, d); break;
       case 'ack': if (typeof d.id === 'string') markMine(id, [d.id], 'delivered'); break;
       case 'read': if (Array.isArray(d.ids)) markMine(id, d.ids.slice(0, 2000), 'read'); break;
       case 'typing': setTyping(id, !!d.on); break;
       case 'react': onReact(id, d); break;
+      case 'unsend': onUnsend(id, d); break;
+      case 'unsent': case 'unsend-no': onUnsendReply(id, d); break;
       default: break; // ping / unknown
     }
   }
@@ -499,7 +762,7 @@
     const text = cleanText(d.text).trim();
     const media = cleanMedia(d.media);
     if (!text && !media) return;
-    sendTo(id, { t: 'ack', id: d.id });
+    post(id, { t: 'ack', id: d.id });
 
     const list = msgsOf(id);
     if (list.some((m) => m.id === d.id)) return; // duplicate after a retry
@@ -534,7 +797,7 @@
     updateTitle();
   }
 
-  const RANK = { pending: 0, delivered: 1, read: 2 };
+  const RANK = { pending: 0, sent: 1, delivered: 2, read: 3 };
   function markMine(id, ids, status) {
     const list = msgsOf(id);
     const want = new Set(ids.filter((x) => typeof x === 'string'));
@@ -552,6 +815,45 @@
     }
   }
 
+  // Profile photos are sent in small parts and put back together on arrival.
+  const AVATAR_PART = 8000;
+  function sendAvatar(id) {
+    const data = S.me && S.me.photo;
+    if (!data) return;
+    const ph = hashStr(data);
+    if (!isOpen(id)) { mailboxSend(id, { t: 'avatar', ph, data }); return; } // the mailbox takes it whole
+    const n = Math.ceil(data.length / AVATAR_PART);
+    for (let i = 0; i < n; i++) {
+      if (!sendTo(id, { t: 'avatar', ph, i, n, part: data.slice(i * AVATAR_PART, (i + 1) * AVATAR_PART) })) return;
+    }
+  }
+
+  const avatarParts = new Map(); // id -> { ph, n, parts, got }
+  function receiveAvatarPart(id, d) {
+    const c = S.contacts[id];
+    if (!c || typeof d.ph !== 'string' || d.ph.length > 16) return;
+    let data = null;
+    if (typeof d.data === 'string') {
+      data = d.data; // single-frame form
+    } else {
+      const n = d.n;
+      const i = d.i;
+      if (!Number.isInteger(n) || n < 1 || n > 40 || !Number.isInteger(i) || i < 0 || i >= n) return;
+      if (typeof d.part !== 'string' || d.part.length > AVATAR_PART) return;
+      let a = avatarParts.get(id);
+      if (!a || a.ph !== d.ph || a.n !== n) { a = { ph: d.ph, n, parts: new Array(n), got: 0 }; avatarParts.set(id, a); }
+      if (a.parts[i] == null) { a.parts[i] = d.part; a.got++; }
+      if (a.got < n) return;
+      avatarParts.delete(id);
+      data = a.parts.join('');
+    }
+    if (data.length > 300000 || !PHOTO_RE.test(data) || hashStr(data) !== d.ph) return;
+    c.photo = data;
+    c.ph = d.ph;
+    saveContacts();
+    refreshContact(id);
+  }
+
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
     if (m.re) o.re = { id: m.re.id, text: m.re.text, by: m.re.me ? 's' : 'r' };
@@ -562,7 +864,7 @@
   function flushOutbox(id) {
     let changed = false;
     for (const m of msgsOf(id)) {
-      if (m.me && m.st === 'pending' && !sendTo(id, wireMsg(m))) break;
+      if (m.me && (m.st === 'pending' || m.st === 'sent') && !sendTo(id, wireMsg(m))) break;
       if (m.rxp && sendTo(id, { t: 'react', id: m.id, e: (m.rx && m.rx.me) || '' })) { delete m.rxp; changed = true; }
     }
     if (changed) saveMsgs(id);
@@ -594,20 +896,25 @@
     const next = m.rx.me === e ? '' : e;
     if (next) m.rx.me = next; else delete m.rx.me;
     m.rxp = true;
-    if (sendTo(id, { t: 'react', id: m.id, e: next })) delete m.rxp;
     saveMsgs(id);
     refreshRow(m, true);
+    post(id, { t: 'react', id: m.id, e: next }).then((ok) => { if (ok && m.rx && (m.rx.me || '') === next) { delete m.rxp; saveMsgs(id); } });
   }
 
-  function flushReceipts(id) {
-    if (!isOpen(id)) return;
-    const list = msgsOf(id);
-    const pend = list.filter((m) => !m.me && m.seen && !m.rr);
+  const receiptsBusy = new Set();
+  async function flushReceipts(id) {
+    if ((!isOpen(id) && !mbReady()) || receiptsBusy.has(id) || isBlocked(id)) return;
+    const pend = msgsOf(id).filter((m) => !m.me && m.seen && !m.rr);
     if (!pend.length) return;
-    if (sendTo(id, { t: 'read', ids: pend.map((m) => m.id) })) {
-      pend.forEach((m) => { m.rr = true; });
-      saveMsgs(id);
-    }
+    receiptsBusy.add(id);
+    try {
+      for (let k = 0; k < pend.length; k += 200) {
+        const batch = pend.slice(k, k + 200);
+        if (!(await post(id, { t: 'read', ids: batch.map((m) => m.id) }))) break;
+        batch.forEach((m) => { m.rr = true; });
+        saveMsgs(id);
+      }
+    } finally { receiptsBusy.delete(id); }
   }
 
   function trim(list) {
@@ -629,8 +936,7 @@
     saveContacts();
     appendMessage(m, true);
     renderList();
-    if (isOpen(id)) sendTo(id, wireMsg(m));
-    else dial(id);
+    dispatch(id, m);
     renderBanner();
     chime('out');
   }
@@ -707,6 +1013,7 @@
     $('#p-avatar').classList.toggle('ink', !S.me.photo);
     $('#btn-photo-remove').hidden = !S.me.photo;
     $('#id-hello').textContent = S.me.name;
+    setBadge($('#me-badge'), S.me.id);
   }
 
   function refreshContact(id) {
@@ -744,6 +1051,7 @@
     const ul = $('#list');
     const all = Object.values(S.contacts);
     const q = S.query;
+    renderNotifCard();
     const items = all
       .filter((c) => !q || nameOf(c).toLowerCase().includes(q) || c.id.toLowerCase().includes(q) ||
         (c.last && c.last.text.toLowerCase().includes(q)))
@@ -785,7 +1093,7 @@
     const name = el('b', 'item-name');
     name.dir = 'auto';
     const time = el('span', 'item-time');
-    top.append(name, time);
+    top.append(name, el('span', 'vslot'), time);
     const bottom = el('span', 'item-bottom');
     const prev = el('span', 'item-preview');
     prev.dir = 'auto';
@@ -803,6 +1111,7 @@
     setAvatar(av, c);
     av.classList.toggle('online', S.presence.get(c.id) === 'online' && !isBlocked(c.id));
     $('.item-name', b).textContent = nameOf(c);
+    setBadge($('.vslot', b), c.id);
     $('.item-time', b).textContent = c.last ? listTime(c.last.ts) : '';
     const prev = $('.item-preview', b);
     const typing = S.typing.has(c.id);
@@ -872,6 +1181,7 @@
   function leaveChat() {
     const id = S.active;
     if (!id) return;
+    closeProfile(true);
     S.drafts[id] = input.value;
     stopTyping(id);
     cancelReply();
@@ -915,6 +1225,7 @@
     if (!id) return;
     const c = S.contacts[id];
     $('#c-name').textContent = nameOf(c);
+    setBadge($('#c-badge'), id);
     const av = $('#c-avatar');
     setAvatar(av, c);
     av.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
@@ -946,11 +1257,9 @@
     const wrap = $('#banner-wrap');
     if (!id || isBlocked(id)) { wrap.classList.remove('show'); return; }
     const c = S.contacts[id];
-    const pending = msgsOf(id).some((m) => m.me && m.st === 'pending');
     const p = S.presence.get(id);
     let text = '';
     if (S.net === 'offline') text = 'أنت غير متصل بالإنترنت. رسائلك محفوظة وبتنرسل أول ما يرجع الاتصال.';
-    else if (pending && p !== 'online') text = `${nameOf(c)} غير متصل الآن. رسالتك محفوظة وبتوصله تلقائياً أول ما تكونون متصلين معاً.`;
     else if (!c.name && !msgsOf(id).length && p && p !== 'online' && p !== 'connecting') text = 'ما قدرنا نوصل لهذا المعرّف الحين. تأكد منه، أو اطلب من صاحبه يفتح رواق.';
     if (text) $('#banner-text').textContent = text;
     wrap.classList.toggle('show', !!text);
@@ -995,7 +1304,11 @@
     const av = el('span', 'avatar');
     setAvatar(av, c);
     wrap.appendChild(av);
-    wrap.appendChild(el('b', null, c.name ? `ابدأ الحديث مع ${c.name}` : `المعرّف ${c.id}`));
+    const title = el('b', null, c.name ? `ابدأ الحديث مع ${c.name}` : `المعرّف ${c.id}`);
+    const slot = el('span', 'vslot');
+    setBadge(slot, c.id);
+    title.appendChild(slot);
+    wrap.appendChild(title);
     wrap.appendChild(el('p', null, 'الرسائل تنتقل مباشرة ومشفّرة بين جهازيكما، ولا تُحفظ في أي خادم.'));
     return wrap;
   }
@@ -1101,7 +1414,8 @@
     uploading: ['cloud', 'جارٍ الرفع'],
     failed: ['alert', 'فشل الرفع'],
     pending: ['clock', 'بانتظار الإرسال'],
-    delivered: ['check', 'وصلت'],
+    sent: ['check', 'أُرسلت'],
+    delivered: ['checks', 'وصلت'],
     read: ['checks', 'قُرئت'],
   };
   function setTick(tk, st) {
@@ -1243,8 +1557,8 @@
     row.addEventListener('animationend', () => row.classList.remove('flash'), { once: true });
   }
 
-  function deleteMsg(m) {
-    const id = S.active;
+  function deleteMsg(m, cid) {
+    const id = cid || S.active;
     const list = msgsOf(id);
     const i = list.indexOf(m);
     if (i < 0) return;
@@ -1254,7 +1568,9 @@
     const last = list[list.length - 1];
     if (c) {
       c.last = last ? { text: mediaLabel(last).slice(0, 140), me: last.me, ts: last.ts } : null;
+      if (!m.me && !m.seen && c.unread) c.unread--;
       saveContacts();
+      updateTitle();
     }
     if (S.reply && S.reply.id === m.id) cancelReply();
     const up = uploads.get(m.id);
@@ -1263,13 +1579,71 @@
       if (up.preview) setTimeout(() => URL.revokeObjectURL(up.preview), 1000);
       uploads.delete(m.id);
     }
+    if (S.active !== id) { renderList(); return; }
     const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
-    const rerender = () => renderMessages(null, true);
+    const rerender = () => { if (S.active === id) renderMessages(null, true); };
     if (row) {
       row.classList.add('leave');
       setTimeout(rerender, 280);
     } else rerender();
     renderList();
+  }
+
+  // ---------------------------------------------------------------- delete for everyone
+
+  // Allowed only while the other side hasn't read the message. Requests wait in a
+  // queue until the other side confirms, and the receiver refuses if it was already read.
+  const unsendQ = store.get('unsend', {}) || {}; // chatId -> [{ id, m }]
+  const saveUnsendQ = () => store.set('unsend', unsendQ);
+
+  function unsendMsg(m) {
+    const cid = S.active;
+    if (!cid || !m.me || m.st === 'read') return;
+    const delivered = m.st === 'delivered' || m.st === 'sent'; // 'sent' = waiting in their mailbox
+    deleteMsg(m, cid); // never-delivered messages just leave the outbox
+    if (!delivered) { toast('تم حذف الرسالة لدى الجميع', { icon: 'check' }); return; }
+    const copy = Object.assign({}, m);
+    delete copy.rxp;
+    (unsendQ[cid] = unsendQ[cid] || []).push({ id: m.id, m: copy });
+    saveUnsendQ();
+    flushUnsend(cid);
+    toast('تم حذف الرسالة لدى الجميع', { icon: 'check' });
+  }
+
+  function flushUnsend(cid) {
+    const q = unsendQ[cid];
+    if (!q || !q.length) return;
+    for (const item of q) post(cid, { t: 'unsend', id: item.id });
+  }
+
+  function onUnsend(cid, d) {
+    if (typeof d.id !== 'string') return;
+    const m = findMsg(cid, d.id);
+    if (!m) { post(cid, { t: 'unsent', id: d.id }); return; } // already gone
+    if (m.me) return;                                            // only the sender may unsend
+    if (m.seen) { post(cid, { t: 'unsend-no', id: d.id }); return; }
+    deleteMsg(m, cid);
+    post(cid, { t: 'unsent', id: d.id });
+  }
+
+  function onUnsendReply(cid, d) {
+    const q = unsendQ[cid];
+    if (!q || typeof d.id !== 'string') return;
+    const i = q.findIndex((x) => x.id === d.id);
+    if (i < 0) return;
+    const [item] = q.splice(i, 1);
+    if (!q.length) delete unsendQ[cid];
+    saveUnsendQ();
+    if (d.t !== 'unsend-no' || !item.m) return;
+    // it was read before the request arrived: put it back where it was
+    const list = msgsOf(cid);
+    if (list.some((x) => x.id === item.id)) return;
+    item.m.st = 'read';
+    const at = list.findIndex((x) => x.ts > item.m.ts);
+    if (at < 0) list.push(item.m); else list.splice(at, 0, item.m);
+    saveMsgs(cid);
+    if (S.active === cid) renderMessages(null, true);
+    toast(`ما انحذفت عند ${nameOf(S.contacts[cid])} لأنه قرأها`, { icon: 'alert', ms: 4000 });
   }
 
   // ---------------------------------------------------------------- message menu
@@ -1279,9 +1653,13 @@
   let ctxMsg = null;
   let heldRow = null;
 
-  function openCtx(m, row) {
+  let ctxHold = false; // true from a long-press until the finger has lifted
+  function openCtx(m, row, byTouch) {
     if (!S.active) return;
     closeCtx(true);
+    ctxHold = !!byTouch;
+    holdUntil = 0;
+    ctxScroll = scroller.scrollTop;
     ctxMsg = m;
     heldRow = row;
     const rr = $('#ctx-reacts');
@@ -1295,6 +1673,7 @@
       rr.appendChild(b);
     });
     $('[data-act="copy"]', ctxCard).hidden = !m.text;
+    $('[data-act="unsend"]', ctxCard).hidden = !(m.me && m.st !== 'read' && !isBlocked(S.active));
     ctx.hidden = false;
     row.classList.add('held');
 
@@ -1328,7 +1707,21 @@
     else setTimeout(() => { if (!ctx.classList.contains('open')) ctx.hidden = true; }, 260);
   }
 
+  // the click synthesised from lifting the finger lands on whatever is under it
+  // (usually the backdrop); swallow it so the menu stays open
+  let holdUntil = 0;
+  const releaseHold = () => { if (ctxHold && !holdUntil) holdUntil = Date.now() + 350; };
+  window.addEventListener('touchend', releaseHold, true);
+  window.addEventListener('pointerup', releaseHold, true);
+  window.addEventListener('pointercancel', releaseHold, true);
   ctx.addEventListener('click', async (e) => {
+    if (ctxHold) {
+      // swallow only the one click that the lift itself produces
+      const fromLift = !holdUntil || Date.now() <= holdUntil;
+      ctxHold = false;
+      holdUntil = 0;
+      if (fromLift) { e.preventDefault(); e.stopPropagation(); return; }
+    }
     if (e.target.closest('[data-ctx-close]')) { closeCtx(); return; }
     const act = e.target.closest('[data-act]');
     if (!act || !ctxMsg) return;
@@ -1336,12 +1729,21 @@
     closeCtx();
     if (act.dataset.act === 'reply') startReply(m);
     else if (act.dataset.act === 'copy') copyText(m.text, 'تم نسخ الرسالة');
+    else if (act.dataset.act === 'unsend') {
+      if (m.st === 'read') { toast('ما تقدر تحذفها لدى الجميع — انقرأت', { icon: 'alert' }); return; }
+      const ok = await confirmBox('حذف لدى الجميع؟', 'بتنحذف من عندك ومن عنده، لأنه ما قرأها للحين.', 'حذف لدى الجميع');
+      if (ok) unsendMsg(m);
+    }
     else if (act.dataset.act === 'delete') {
       const ok = await confirmBox('حذف الرسالة؟', 'بتنحذف من جهازك فقط، وتبقى عند الطرف الثاني.', 'حذف');
       if (ok) deleteMsg(m);
     }
   });
-  scroller.addEventListener('scroll', () => closeCtx(), { passive: true });
+  // close on a real scroll only: momentum from an earlier swipe must not snap it shut
+  let ctxScroll = 0;
+  scroller.addEventListener('scroll', () => {
+    if (!ctx.hidden && Math.abs(scroller.scrollTop - ctxScroll) > 24) closeCtx();
+  }, { passive: true });
 
   const msgOfRow = (row) => (row && S.active ? findMsg(S.active, row.dataset.id) : null);
 
@@ -1364,7 +1766,7 @@
       else retryUpload(m);
       return;
     }
-    const view = e.target.closest('[data-view]');
+    const view = e.target.closest('.media[data-view]');
     if (view) {
       const m = msgOfRow(view.closest('.msg'));
       if (m) openViewer(m);
@@ -1393,7 +1795,7 @@
       if (!m) return;
       suppressClick = true;
       setTimeout(() => { suppressClick = false; }, 800);
-      openCtx(m, row);
+      openCtx(m, row, true);
     }, 430);
     gesture = g;
   });
@@ -1718,13 +2120,19 @@
     startUpload(id, m);
   }
 
-  function startUpload(cid, m) {
+  // Every upload gets its own random, unguessable name and public ID. A fixed name
+  // ("photo.jpg") let presets that name assets after the file return someone else's
+  // earlier photo instead of storing the new one — never let that happen again.
+  const randomName = () => rand(24, 'abcdefghijkmnopqrstuvwxyz23456789');
+  function startUpload(cid, m, attempt = 0) {
     const up = uploads.get(m.id);
     if (!up || !up.blob) return;
     const fd = new FormData();
-    const name = up.kind === 'image' ? 'photo.jpg' : (up.blob.name || 'video.mp4');
-    fd.append('file', up.blob, name);
+    const pid = randomName();
+    const ext = up.kind === 'image' ? 'jpg' : ((up.blob.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
+    fd.append('file', up.blob, `${pid}.${ext}`);
     fd.append('upload_preset', CFG.cloud.uploadPreset);
+    if (attempt < 2) fd.append('public_id', pid); // a preset may forbid it; the last try relies on the random file name
     const xhr = new XMLHttpRequest();
     up.xhr = xhr;
     up.pct = 0;
@@ -1747,7 +2155,20 @@
       let res = null;
       try { res = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
       if (xhr.status < 200 || xhr.status >= 300 || !res || !res.secure_url) {
+        if (attempt < 2 && xhr.status === 400 && res && res.error && /public.?id/i.test(String(res.error.message))) {
+          up.xhr = null;
+          startUpload(cid, m, 2); // preset rejects custom public IDs
+          return;
+        }
         fail(res && res.error && res.error.message ? String(res.error.message).slice(0, 80) : '');
+        return;
+      }
+      // "existing" means the storage handed back an asset that was already there, i.e. NOT
+      // this file. Never send that link: retry under a fresh name, then give up.
+      if (res.existing === true) {
+        up.xhr = null;
+        if (attempt < 2) { startUpload(cid, m, attempt + 1); return; }
+        fail('التخزين رجّع ملف قديم بدل ملفك — راجع إعدادات الـpreset');
         return;
       }
       const media = cleanMedia({
@@ -1761,7 +2182,7 @@
       m.st = 'pending';
       saveMsgs(cid);
       if (S.active === cid) { refreshRow(m); renderBanner(); }
-      if (isOpen(cid)) sendTo(cid, wireMsg(m)); else dial(cid);
+      dispatch(cid, m);
     };
     xhr.send(fd);
     m.st = 'uploading';
@@ -1836,7 +2257,7 @@
     }
     store.set('blocked', S.blocked);
     renderList();
-    if (S.active === id) { renderComposer(); renderChatHead(true); renderBanner(); }
+    if (S.active === id) { renderComposer(); renderChatHead(true); renderBanner(); if (!profileEl.hidden) fillProfile(); }
     if (!on) dial(id);
   }
 
@@ -1877,6 +2298,181 @@
       ul.appendChild(li);
     }
   }
+
+  // ---------------------------------------------------------------- verified badge
+
+  const VERIFIED = new Set((CFG.verified || []).map(normalizeId).filter(isValidId));
+  const isVerified = (id) => VERIFIED.has(id);
+
+  function setBadge(slot, id) {
+    if (!slot) return;
+    const on = !!id && isVerified(id);
+    if (on && !slot.firstChild) {
+      const b = el('span', 'vbadge');
+      b.setAttribute('role', 'button');
+      b.tabIndex = 0;
+      b.dataset.vid = id;
+      b.setAttribute('aria-label', 'حساب موثّق');
+      b.innerHTML = '<svg class="vbadge-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg>';
+      slot.appendChild(b);
+    } else if (on) {
+      slot.firstChild.dataset.vid = id;
+    } else if (!on && slot.firstChild) {
+      slot.textContent = '';
+    }
+  }
+
+  const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+  const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Telegram-style: the card rises up out of the badge you tapped.
+  const vpop = $('#vpop');
+  const vcard = $('#vpop-card');
+  let vAnchor = null;
+  function showBadgePop(badge) {
+    const id = badge.dataset.vid;
+    const mine = S.me && id === S.me.id;
+    const c = S.contacts[id];
+    $('#vpop-text').textContent = mine
+      ? 'حسابك موثّق رسمياً في رواق.'
+      : `${nameOf(c) || id} حساب موثّق رسمياً في رواق. تقدر تطمّن إنك تكلّم الشخص الصحيح.`;
+    vAnchor = badge;
+    vpop.hidden = false;
+    const a = badge.getBoundingClientRect();
+    const w = vcard.offsetWidth;
+    const h = vcard.offsetHeight;
+    const vw = document.documentElement.clientWidth;
+    const vh = $('#app').clientHeight;
+    const ax = a.left + a.width / 2;
+    let left = Math.max(12, Math.min(vw - w - 12, ax - w / 2));
+    // sit above the badge when there is room, otherwise centred on screen
+    let top = a.top - h - 14;
+    if (top < 12) top = Math.max(12, (vh - h) / 2);
+    vcard.style.left = left + 'px';
+    vcard.style.top = top + 'px';
+    vcard.style.transformOrigin = `${ax - left}px 100%`;
+    vpop.classList.remove('closing');
+    void vpop.offsetWidth;
+    vpop.classList.add('open');
+    if (!reduceMotion()) {
+      // always rises upward, easing in with a soft spring
+      vcard.animate([
+        { opacity: 0, transform: 'translateY(70px) scale(.55)' },
+        { opacity: 1, offset: 0.4 },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 680, easing: SPRING, fill: 'both' });
+    }
+    if (isTouch && navigator.vibrate) { try { navigator.vibrate(10); } catch (_) { /* ignore */ } }
+    setTimeout(() => { const f = $('[data-vpop-close].btn', vcard); if (f && !isTouch) f.focus({ preventScroll: true }); }, 80);
+  }
+  function closeBadgePop() {
+    if (vpop.hidden) return;
+    vpop.classList.remove('open');
+    vpop.classList.add('closing');
+    const done = () => { if (!vpop.classList.contains('open')) vpop.hidden = true; };
+    if (reduceMotion()) { done(); return; }
+    const anim = vcard.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(.9)' }],
+      { duration: 200, easing: 'ease-in', fill: 'both' });
+    anim.onfinish = done;
+    if (vAnchor && !isTouch) vAnchor.focus({ preventScroll: true });
+  }
+  vpop.addEventListener('click', (e) => { if (e.target.closest('[data-vpop-close]')) closeBadgePop(); });
+  // capture phase so a badge inside a chat row doesn't also open the chat
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.vbadge');
+    if (!b) return;
+    e.preventDefault();
+    e.stopPropagation();
+    showBadgePop(b);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('vbadge')) {
+      e.preventDefault();
+      e.stopPropagation();
+      showBadgePop(e.target);
+    }
+  }, true);
+
+  // ---------------------------------------------------------------- profile panel
+
+  // Telegram-style shared element transition: the header avatar and name
+  // grow and glide up into the profile, and back down on close.
+  const profileEl = $('#profile');
+  const pfAvatar = $('#pf-avatar');
+  const pfName = $('#pf-name-line');
+
+  function fillProfile() {
+    const id = S.active;
+    const c = S.contacts[id];
+    if (!c) return;
+    setAvatar(pfAvatar, c);
+    pfAvatar.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
+    $('#pf-name').textContent = nameOf(c);
+    setBadge($('#pf-badge'), id);
+    $('#pf-status').textContent = $('#c-status').textContent;
+    $('#pf-id').textContent = id;
+    $('#pf-verified').hidden = !isVerified(id);
+    $('#pf-block-label').textContent = isBlocked(id) ? 'إلغاء الحظر' : 'حظر';
+  }
+
+  function flip(fromEl, toEl, back) {
+    const a = fromEl.getBoundingClientRect();
+    const b = toEl.getBoundingClientRect();
+    if (!a.width || !b.width) return null;
+    const dx = a.left + a.width / 2 - (b.left + b.width / 2);
+    const dy = a.top + a.height / 2 - (b.top + b.height / 2);
+    const sc = a.height / b.height;
+    const start = `translate(${dx}px, ${dy}px) scale(${sc})`;
+    const frames = back ? [{ transform: 'none' }, { transform: start }] : [{ transform: start }, { transform: 'none' }];
+    return toEl.animate(frames, { duration: back ? 420 : 620, easing: EASE, fill: 'both' });
+  }
+
+  let profileAnim = null;
+  function openProfile() {
+    if (!S.active || !profileEl.hidden) return;
+    fillProfile();
+    profileEl.hidden = false;
+    $('.pf-scroll', profileEl).scrollTop = 0;
+    void profileEl.offsetWidth;
+    profileEl.classList.add('open');
+    if (!reduceMotion()) {
+      flip($('#c-avatar'), pfAvatar, false);
+      profileAnim = flip($('#c-name'), pfName, false);
+    }
+    $('.chat-head').classList.add('under-profile');
+    setTimeout(() => { if (!isTouch) $('#pf-close').focus({ preventScroll: true }); }, 50);
+  }
+
+  function closeProfile(instant) {
+    if (profileEl.hidden) return;
+    profileEl.classList.remove('open');
+    $('.chat-head').classList.remove('under-profile');
+    const finish = () => {
+      if (profileEl.classList.contains('open')) return;
+      profileEl.hidden = true;
+      pfAvatar.getAnimations().forEach((a) => a.cancel());
+      pfName.getAnimations().forEach((a) => a.cancel());
+    };
+    if (instant || reduceMotion()) { finish(); return; }
+    flip($('#c-avatar'), pfAvatar, true);
+    const anim = flip($('#c-name'), pfName, true);
+    if (anim) anim.onfinish = finish; else setTimeout(finish, 420);
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.head-open')) openProfile();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('head-open')) openProfile();
+  });
+  $('#pf-close').addEventListener('click', () => closeProfile());
+  $('#pf-msg').addEventListener('click', () => {
+    closeProfile();
+    if (!isTouch && !isBlocked(S.active)) setTimeout(() => input.focus({ preventScroll: true }), 300);
+  });
+  $('#pf-copy').addEventListener('click', () => { if (S.active) copyText(S.active, 'تم نسخ المعرّف'); });
+  $('#pf-block').addEventListener('click', () => $('#btn-block').click());
 
   // ---------------------------------------------------------------- feedback
 
@@ -2080,6 +2676,8 @@
     }
     if (e.key !== 'Escape') return;
     if (!viewer.hidden) { closeViewer(); return; }
+    if (!vpop.hidden) { closeBadgePop(); return; }
+    if (!profileEl.hidden) { closeProfile(); return; }
     if (!ctx.hidden) { closeCtx(); return; }
     if (S.reply && document.activeElement === input) { cancelReply(); return; }
     if (openM) closeModal();
@@ -2123,11 +2721,70 @@
 
   // ---------------------------------------------------------------- notifications setting
 
+  const pushConfigured = () => !!(CFG.push && CFG.push.publicKey && CFG.push.worker && DB);
+  const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // iPhone/iPad only allow web notifications for apps added to the home screen
+  const needsInstall = () => isIOS && !isStandalone();
+
   function renderNotify() {
     const st = $('#notify-state');
+    if (needsInstall()) { st.textContent = 'ثبّت التطبيق أولاً'; return; }
     if (!('Notification' in window)) { st.textContent = 'غير مدعومة'; return; }
     st.textContent = Notification.permission === 'granted' ? 'مفعّلة'
       : Notification.permission === 'denied' ? 'محظورة من المتصفح' : 'تفعيل';
+  }
+
+  function renderNotifCard() {
+    const card = $('#notif-card');
+    const show = !!S.me && pushConfigured() && pushSupported() && Notification.permission === 'default' &&
+      !needsInstall() && !store.get('notifDismissed', false) && Object.keys(S.contacts).length > 0;
+    card.hidden = !show;
+  }
+
+  const b64urlToU8 = (s2) => {
+    const pad = '='.repeat((4 - (s2.length % 4)) % 4);
+    return Uint8Array.from(atob((s2 + pad).replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
+  };
+
+  // Subscribe this device to Web Push and register it under our ID.
+  async function ensurePush() {
+    if (!pushConfigured() || !pushSupported() || !S.me || !owner) return false;
+    if (Notification.permission !== 'granted') return false;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToU8(CFG.push.publicKey) });
+      }
+      const json = sub.toJSON();
+      const sig = hashStr(S.me.id + json.endpoint);
+      if (store.get('pushSaved', '') === sig) return true;
+      await db('PUT', `push/${S.me.id}`, { endpoint: json.endpoint, keys: json.keys, t: Date.now() });
+      store.set('pushSaved', sig);
+      return true;
+    } catch (e) {
+      console.warn('rawaq: push subscription failed', e);
+      return false;
+    }
+  }
+
+  async function enableNotifications() {
+    if (needsInstall()) {
+      toast('على الآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح رواق من هناك', { icon: 'alert', ms: 6000 });
+      return;
+    }
+    if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
+    } else if (Notification.permission === 'denied') {
+      toast('فعّل التنبيهات من إعدادات المتصفح', { icon: 'alert' });
+    }
+    if (Notification.permission === 'granted') {
+      const ok = await ensurePush();
+      toast(ok || !pushConfigured() ? 'تم تفعيل التنبيهات' : 'تفعّلت التنبيهات داخل التطبيق فقط', { icon: 'check' });
+    }
+    renderNotify();
+    renderNotifCard();
   }
 
   // ---------------------------------------------------------------- viewport
@@ -2431,15 +3088,9 @@
     document.addEventListener('dragstart', (e) => {
       if (!e.target.closest || !e.target.closest('input, textarea')) e.preventDefault();
     });
-    $('#btn-notify').addEventListener('click', async () => {
-      if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
-      if (Notification.permission === 'default') {
-        try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
-      } else if (Notification.permission === 'denied') {
-        toast('فعّل التنبيهات من إعدادات المتصفح', { icon: 'alert' });
-      }
-      renderNotify();
-    });
+    $('#btn-notify').addEventListener('click', enableNotifications);
+    $('#notif-on').addEventListener('click', enableNotifications);
+    $('#notif-x').addEventListener('click', () => { store.set('notifDismissed', true); renderNotifCard(); });
     $('#btn-reset').addEventListener('click', async () => {
       const ok = await confirmBox('حذف بياناتك؟', 'بينحذف اسمك ومعرّفك وكل محادثاتك من هذا الجهاز. ما تقدر تتراجع.', 'حذف نهائي');
       if (!ok) return;
@@ -2503,6 +3154,7 @@
     });
     window.addEventListener('pagehide', () => {
       flushSave();
+      for (const set of conns.values()) for (const c of set) send(c, { t: 'bye' });
       if (peer) { try { peer.destroy(); } catch (_) { /* ignore */ } }
     });
     window.addEventListener('pageshow', (e) => { if (e.persisted && owner && S.me) netStart(); });
@@ -2512,6 +3164,17 @@
     // refresh relative times ("today", "last seen") once a minute
     setInterval(() => { renderList(); if (S.active) renderChatHead(); }, 60000);
   }
+
+  // ---------------------------------------------------------------- no zoom on phones
+
+  // iOS Safari ignores user-scalable=no, so block its pinch gestures directly.
+  // Double-tap zoom is turned off with touch-action: manipulation in CSS.
+  for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
 
   // ---------------------------------------------------------------- boot
 

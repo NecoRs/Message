@@ -1,5 +1,5 @@
 /* رواق — service worker: offline app shell + notification clicks. */
-const CACHE = 'rawaq-v3';
+const CACHE = 'rawaq-v6';
 const SHELL = [
   './',
   'index.html',
@@ -60,6 +60,26 @@ self.addEventListener('fetch', (e) => {
     const hit = await cache.match(req, { ignoreSearch: true }) ||
       (req.mode === 'navigate' ? await cache.match('index.html') : null);
     return hit || fromNet;
+  })());
+});
+
+// Web Push from the push worker. It carries no content: the message itself
+// waits encrypted in the mailbox and is fetched when the app opens.
+self.addEventListener('push', (e) => {
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (wins.some((w) => w.visibilityState === 'visible' && w.focused)) return; // the open app shows it itself
+    await self.registration.showNotification('رواق', {
+      body: 'وصلتك رسالة جديدة',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      tag: 'rawaq-inbox',
+      renotify: true,
+      lang: 'ar',
+      dir: 'rtl',
+      data: { id: '' },
+    });
+    if (self.navigator && self.navigator.setAppBadge) self.navigator.setAppBadge().catch(() => {});
   })());
 });
 

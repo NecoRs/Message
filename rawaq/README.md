@@ -68,7 +68,7 @@ cloud: { cloudName: 'dxyz123', uploadPreset: 'rawaq_unsigned' },
 }
 ```
 
-4. انسخ رابط القاعدة اللي فوق (مثل `https://rawaq-1234-default-rtdb.firebaseio.com`) وحطه في `config.js` داخل `db: { url: '…' }`.
+4. في `config.js` داخل `db` اكتب اسم القاعدة في `instance` (مثل `rawaq-1234-default-rtdb`، يطلع في رابط صفحة القاعدة)، ورواق يعرف المنطقة لحاله. أو حط الرابط الكامل في `url`.
 
 > بدون هالإعداد يشتغل رواق مثل قبل: الرسائل توصل بس إذا الطرفين فاتحين بنفس الوقت.
 

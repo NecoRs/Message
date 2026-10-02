@@ -397,6 +397,8 @@
     });
     conn.on('data', (data) => {
       conn._heard = Date.now();
+      // the other side is closing: drop the link now so new messages use the mailbox
+      if (data && data.t === 'bye') { try { conn.close(); } catch (_) { /* ignore */ } drop(); return; }
       onData(id, data);
     });
     const drop = () => {
@@ -469,7 +471,38 @@
   // AES-GCM) and dropped into the recipient's inbox on a Firebase Realtime Database.
   // The recipient streams its inbox, decrypts, handles each item exactly like a
   // direct message, then deletes it. The server only ever sees ciphertext.
-  const DB = CFG.db && typeof CFG.db.url === 'string' ? CFG.db.url.trim().replace(/\/+$/, '') : '';
+  // Either an explicit URL, or just the instance name: the URL differs by region, so
+  // try each Realtime Database region and remember the one that answers.
+  const DB_HOSTS = ['firebaseio.com', 'europe-west1.firebasedatabase.app', 'asia-southeast1.firebasedatabase.app'];
+  const dbCandidates = () => {
+    const c = CFG.db || {};
+    if (typeof c.url === 'string' && c.url.trim()) return [c.url.trim().replace(/\/+$/, '')];
+    const inst = typeof c.instance === 'string' ? c.instance.trim() : '';
+    if (!/^[a-z0-9-]{3,63}$/.test(inst)) return [];
+    return DB_HOSTS.map((h) => `https://${inst}.${h}`);
+  };
+  let DB = dbCandidates().length === 1 ? dbCandidates()[0] : '';
+  let dbResolving = null;
+  function resolveDb() {
+    if (DB) return Promise.resolve(DB);
+    const cands = dbCandidates();
+    if (!cands.length) return Promise.resolve('');
+    const cached = store.get('dbUrl', '');
+    if (cached && cands.includes(cached)) { DB = cached; return Promise.resolve(DB); }
+    if (!dbResolving) {
+      dbResolving = (async () => {
+        for (const u of cands) {
+          try {
+            const r = await fetch(`${u}/keys.json?shallow=true`, { cache: 'no-store' });
+            if (r.ok) { store.set('dbUrl', u); DB = u; break; }
+          } catch (_) { /* wrong region or offline: try the next */ }
+        }
+        dbResolving = null;
+        return DB;
+      })();
+    }
+    return dbResolving;
+  }
   let myKeys = null;              // { priv: CryptoKey, pub: base64 raw public key }
   let es = null;                  // EventSource on our inbox
   let published = false;
@@ -558,8 +591,17 @@
 
   // A new or retried message: direct when linked; otherwise mailbox now, link later.
   function dispatch(id, m) {
-    if (isOpen(id) && sendTo(id, wireMsg(m))) return;
+    if (isOpen(id) && sendTo(id, wireMsg(m))) {
+      // a link can look open while the other side has just gone away: if no
+      // delivery receipt comes back soon, drop a copy in the mailbox as well
+      if (mbReady()) setTimeout(() => { if (m.st === 'pending' && !isBlocked(id) && msgsOf(id).includes(m)) mailboxDrop(id, m); }, 4000);
+      return;
+    }
     dial(id);
+    mailboxDrop(id, m);
+  }
+
+  function mailboxDrop(id, m) {
     if (mbBusy.has(m.id)) return;
     mbBusy.add(m.id);
     mailboxSend(id, wireMsg(m)).then((ok) => {
@@ -643,7 +685,8 @@
   }
 
   async function mbStart() {
-    if (!DB || es || !S.me || !owner) return;
+    if (es || !S.me || !owner) return;
+    if (!(await resolveDb())) return;
     try { await loadKeys(); } catch (_) { return; }
     if (!mbReady() || es) return;
     publishKey();
@@ -661,6 +704,7 @@
     for (const id of Object.keys(S.contacts)) flushReceipts(id);
     setTimeout(retryMailbox, 1500);
     ensurePush();
+    renderNotifCard();
   }
 
   function mbStop() {
@@ -3110,6 +3154,7 @@
     });
     window.addEventListener('pagehide', () => {
       flushSave();
+      for (const set of conns.values()) for (const c of set) send(c, { t: 'bye' });
       if (peer) { try { peer.destroy(); } catch (_) { /* ignore */ } }
     });
     window.addEventListener('pageshow', (e) => { if (e.persisted && owner && S.me) netStart(); });

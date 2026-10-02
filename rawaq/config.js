@@ -18,7 +18,8 @@ window.RAWAQ_CONFIG = Object.assign({
    * الرسائل تتشفّر في جهازك قبل ما تنرفع، والسيرفر ما يقدر يقراها.
    */
   db: {
-    url: '',           // مثال: 'https://rawaq-1234-default-rtdb.firebaseio.com'
+    instance: 'rawaq-b78a7-default-rtdb', // اسم القاعدة — المنطقة تنعرف تلقائياً
+    url: '',           // أو الرابط الكامل إذا تبي تحدده، مثال: 'https://rawaq-1234-default-rtdb.firebaseio.com'
   },
   /*
    * تنبيهات الجوال والتطبيق مسكّر (Web Push عبر Cloudflare Worker، مجاني).

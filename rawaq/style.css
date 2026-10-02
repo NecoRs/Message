@@ -1255,6 +1255,22 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .viewer-bar .icon-btn:hover { background: rgba(255, 255, 255, .22); }
 .viewer-caption { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.notif-card {
+  margin: 10px 16px 0;
+  padding: 10px 10px 10px 8px;
+  padding-inline-start: 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-radius: 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-size: 13.5px; line-height: 1.5;
+  animation: rise .6s var(--ease) both .2s;
+}
+.notif-card > span { flex: 1; }
+.notif-card > .i { color: var(--fg); }
+.notif-card .btn { height: 38px; padding: 0 14px; font-size: 14px; border-radius: 12px; }
+.notif-card .icon-btn { width: 34px; height: 34px; }
+
 /* ---------- verified badge ---------- */
 
 .vslot { display: inline-flex; align-items: center; flex: none; vertical-align: middle; }

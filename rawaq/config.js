@@ -20,6 +20,14 @@ window.RAWAQ_CONFIG = Object.assign({
   db: {
     url: '',           // مثال: 'https://rawaq-1234-default-rtdb.firebaseio.com'
   },
+  /*
+   * تنبيهات الجوال والتطبيق مسكّر (Web Push عبر Cloudflare Worker، مجاني).
+   * الخطوات في README.md. يحتاج إعداد db فوق.
+   */
+  push: {
+    publicKey: '',     // VAPID_PUBLIC من صفحة tools/vapid.html
+    worker: '',        // رابط الـ Worker، مثال: 'https://rawaq-push.yourname.workers.dev'
+  },
   cloud: {
     cloudName: 'ipz2vzxb',
     uploadPreset: 'ml_default',

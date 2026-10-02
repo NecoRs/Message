@@ -17,6 +17,7 @@
     mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
     verified: ['QXYWNW'],  // IDs that get the verified badge
     db: { url: '' },       // Firebase Realtime Database URL: offline delivery mailbox
+    push: { publicKey: '', worker: '' }, // Web Push: VAPID public key + Cloudflare Worker URL
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
   const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
@@ -563,11 +564,25 @@
     mbBusy.add(m.id);
     mailboxSend(id, wireMsg(m)).then((ok) => {
       mbBusy.delete(m.id);
-      if (!ok || m.st !== 'pending') return;
+      if (!ok) return;
+      pingPush(id);
+      if (m.st !== 'pending') return;
       m.st = 'sent';
       saveMsgs(id);
       if (S.active === id) updateTick(m);
     });
+  }
+
+  // Wake the recipient's phone (installed app) through the push worker.
+  // At most once per 15s per person; the notification carries no message text.
+  const pushPinged = new Map();
+  function pingPush(to) {
+    const url = CFG.push && CFG.push.worker;
+    if (!url || !isValidId(to)) return;
+    const now = Date.now();
+    if (now - (pushPinged.get(to) || 0) < 15000) return;
+    pushPinged.set(to, now);
+    fetch(url, { method: 'POST', body: JSON.stringify({ to }), keepalive: true }).catch(() => {});
   }
 
   // pending messages whose mailbox drop failed (offline, recipient had no key yet, …)
@@ -645,6 +660,7 @@
     es.addEventListener('cancel', () => mbStop());
     for (const id of Object.keys(S.contacts)) flushReceipts(id);
     setTimeout(retryMailbox, 1500);
+    ensurePush();
   }
 
   function mbStop() {
@@ -991,6 +1007,7 @@
     const ul = $('#list');
     const all = Object.values(S.contacts);
     const q = S.query;
+    renderNotifCard();
     const items = all
       .filter((c) => !q || nameOf(c).toLowerCase().includes(q) || c.id.toLowerCase().includes(q) ||
         (c.last && c.last.text.toLowerCase().includes(q)))
@@ -2641,11 +2658,70 @@
 
   // ---------------------------------------------------------------- notifications setting
 
+  const pushConfigured = () => !!(CFG.push && CFG.push.publicKey && CFG.push.worker && DB);
+  const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // iPhone/iPad only allow web notifications for apps added to the home screen
+  const needsInstall = () => isIOS && !isStandalone();
+
   function renderNotify() {
     const st = $('#notify-state');
+    if (needsInstall()) { st.textContent = 'ثبّت التطبيق أولاً'; return; }
     if (!('Notification' in window)) { st.textContent = 'غير مدعومة'; return; }
     st.textContent = Notification.permission === 'granted' ? 'مفعّلة'
       : Notification.permission === 'denied' ? 'محظورة من المتصفح' : 'تفعيل';
+  }
+
+  function renderNotifCard() {
+    const card = $('#notif-card');
+    const show = !!S.me && pushConfigured() && pushSupported() && Notification.permission === 'default' &&
+      !needsInstall() && !store.get('notifDismissed', false) && Object.keys(S.contacts).length > 0;
+    card.hidden = !show;
+  }
+
+  const b64urlToU8 = (s2) => {
+    const pad = '='.repeat((4 - (s2.length % 4)) % 4);
+    return Uint8Array.from(atob((s2 + pad).replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
+  };
+
+  // Subscribe this device to Web Push and register it under our ID.
+  async function ensurePush() {
+    if (!pushConfigured() || !pushSupported() || !S.me || !owner) return false;
+    if (Notification.permission !== 'granted') return false;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToU8(CFG.push.publicKey) });
+      }
+      const json = sub.toJSON();
+      const sig = hashStr(S.me.id + json.endpoint);
+      if (store.get('pushSaved', '') === sig) return true;
+      await db('PUT', `push/${S.me.id}`, { endpoint: json.endpoint, keys: json.keys, t: Date.now() });
+      store.set('pushSaved', sig);
+      return true;
+    } catch (e) {
+      console.warn('rawaq: push subscription failed', e);
+      return false;
+    }
+  }
+
+  async function enableNotifications() {
+    if (needsInstall()) {
+      toast('على الآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح رواق من هناك', { icon: 'alert', ms: 6000 });
+      return;
+    }
+    if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
+    } else if (Notification.permission === 'denied') {
+      toast('فعّل التنبيهات من إعدادات المتصفح', { icon: 'alert' });
+    }
+    if (Notification.permission === 'granted') {
+      const ok = await ensurePush();
+      toast(ok || !pushConfigured() ? 'تم تفعيل التنبيهات' : 'تفعّلت التنبيهات داخل التطبيق فقط', { icon: 'check' });
+    }
+    renderNotify();
+    renderNotifCard();
   }
 
   // ---------------------------------------------------------------- viewport
@@ -2949,15 +3025,9 @@
     document.addEventListener('dragstart', (e) => {
       if (!e.target.closest || !e.target.closest('input, textarea')) e.preventDefault();
     });
-    $('#btn-notify').addEventListener('click', async () => {
-      if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
-      if (Notification.permission === 'default') {
-        try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
-      } else if (Notification.permission === 'denied') {
-        toast('فعّل التنبيهات من إعدادات المتصفح', { icon: 'alert' });
-      }
-      renderNotify();
-    });
+    $('#btn-notify').addEventListener('click', enableNotifications);
+    $('#notif-on').addEventListener('click', enableNotifications);
+    $('#notif-x').addEventListener('click', () => { store.set('notifDismissed', true); renderNotifCard(); });
     $('#btn-reset').addEventListener('click', async () => {
       const ok = await confirmBox('حذف بياناتك؟', 'بينحذف اسمك ومعرّفك وكل محادثاتك من هذا الجهاز. ما تقدر تتراجع.', 'حذف نهائي');
       if (!ok) return;

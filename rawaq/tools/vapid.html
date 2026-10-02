@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>مفاتيح تنبيهات رواق</title>
+  <style>
+    :root { --bg: #fff; --fg: #0b0b0b; --muted: #777; --line: #e6e6e6; --soft: #f6f6f6; color-scheme: light dark; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0a; --fg: #f3f3f3; --muted: #8a8a8a; --line: #262626; --soft: #151515; } }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p { color: var(--muted); margin: 0 0 18px; }
+    button { font: inherit; font-weight: 600; border: 0; border-radius: 14px; padding: 12px 18px; background: var(--fg); color: var(--bg); cursor: pointer; }
+    .key { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--soft); }
+    .key b { display: block; margin-bottom: 6px; }
+    .key small { display: block; color: var(--muted); margin-bottom: 8px; }
+    textarea { width: 100%; box-sizing: border-box; min-height: 64px; font: 13px/1.5 ui-monospace, Menlo, monospace; direction: ltr; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--bg); color: var(--fg); resize: vertical; }
+    .copy { margin-top: 8px; padding: 8px 14px; font-size: 14px; background: var(--soft); color: var(--fg); border: 1px solid var(--line); }
+    .warn { color: #b91c1c; font-weight: 600; }
+    @media (prefers-color-scheme: dark) { .warn { color: #f87171; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>مفاتيح تنبيهات رواق (VAPID)</h1>
+    <p>المفاتيح تتولّد هنا داخل متصفحك، وما تنرسل لأي مكان. ولّدها مرة وحدة بس.</p>
+    <button type="button" id="gen">ولّد المفاتيح</button>
+    <div id="out" hidden>
+      <div class="key">
+        <b>VAPID_PUBLIC — المفتاح العام</b>
+        <small>حطه في <code>config.js</code> داخل <code>push.publicKey</code>، وفي Cloudflare كمتغيّر باسم <code>VAPID_PUBLIC</code>.</small>
+        <textarea id="pub" readonly></textarea>
+        <button class="copy" type="button" data-copy="pub">نسخ</button>
+      </div>
+      <div class="key">
+        <b>VAPID_PRIVATE_JWK — المفتاح الخاص</b>
+        <small class="warn">سري: حطه في Cloudflare فقط كـ Secret باسم <code>VAPID_PRIVATE_JWK</code>. لا ترسله لأحد ولا تحطه في الموقع.</small>
+        <textarea id="priv" readonly></textarea>
+        <button class="copy" type="button" data-copy="priv">نسخ</button>
+      </div>
+    </div>
+  </main>
+  <script>
+    const b64url = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    document.getElementById('gen').addEventListener('click', async () => {
+      const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      const pub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+      const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+      document.getElementById('pub').value = b64url(pub);
+      document.getElementById('priv').value = JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d });
+      document.getElementById('out').hidden = false;
+    });
+    document.addEventListener('click', async (e) => {
+      const id = e.target.dataset && e.target.dataset.copy;
+      if (!id) return;
+      const t = document.getElementById(id);
+      try { await navigator.clipboard.writeText(t.value); } catch (_) { t.select(); document.execCommand('copy'); }
+      e.target.textContent = 'تم النسخ ✓';
+      setTimeout(() => { e.target.textContent = 'نسخ'; }, 1500);
+    });
+  </script>
+</body>
+</html>

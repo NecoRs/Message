@@ -16,6 +16,7 @@
     probeEvery: 30000,     // how often to check whether contacts came online
     mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
     verified: ['QXYWNW'],  // IDs that get the verified badge
+    db: { url: '' },       // Firebase Realtime Database URL: offline delivery mailbox
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
   const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
@@ -213,7 +214,7 @@
       c = S.contacts[id] = { id, name: heardNames.get(id) || '', unread: 0, last: null, updated: Date.now(), seen: 0 };
       saveContacts();
       renderList();
-      if (heardPh.get(id)) sendTo(id, { t: 'avatar?' });
+      if (heardPh.get(id)) post(id, { t: 'avatar?' });
     }
     return c;
   }
@@ -256,6 +257,7 @@
     stopped = false;
     setNet(navigator.onLine === false ? 'offline' : 'connecting');
 
+    mbStart();
     const p = new window.Peer(CFG.prefix + S.me.id, Object.assign({ debug: 0 }, CFG.peer));
     peer = p;
 
@@ -284,6 +286,7 @@
   }
 
   function netStop() {
+    mbStop();
     stopped = true;
     clearTimeout(retryTimer);
     retryTimer = 0;
@@ -447,6 +450,7 @@
     }
   }, 15000);
   setInterval(probeAll, CFG.probeEvery);
+  setInterval(() => retryMailbox(), CFG.probeEvery);
 
   function setPresence(id, p) {
     const prev = S.presence.get(id);
@@ -456,6 +460,195 @@
     if (c && (prev === 'online' || p === 'online')) { c.seen = Date.now(); saveContacts(); }
     renderList();
     if (S.active === id) { renderChatHead(); renderBanner(); }
+  }
+
+  // ---------------------------------------------------------------- offline mailbox
+
+  // When there is no direct link, messages are end-to-end encrypted (ECDH P-256 +
+  // AES-GCM) and dropped into the recipient's inbox on a Firebase Realtime Database.
+  // The recipient streams its inbox, decrypts, handles each item exactly like a
+  // direct message, then deletes it. The server only ever sees ciphertext.
+  const DB = CFG.db && typeof CFG.db.url === 'string' ? CFG.db.url.trim().replace(/\/+$/, '') : '';
+  let myKeys = null;              // { priv: CryptoKey, pub: base64 raw public key }
+  let es = null;                  // EventSource on our inbox
+  let published = false;
+  const pubCache = new Map();     // id -> base64 public key
+  const aesCache = new Map();     // id -> AES-GCM CryptoKey shared with that id
+  const mbReady = () => !!(DB && myKeys && S.me && owner && window.crypto && crypto.subtle);
+
+  const b64 = (u8) => { let s2 = ''; for (let i = 0; i < u8.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s2); };
+  const unb64 = (str) => Uint8Array.from(atob(str), (ch) => ch.charCodeAt(0));
+  const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
+
+  async function loadKeys() {
+    if (myKeys || !window.crypto || !crypto.subtle) return myKeys;
+    const saved = store.get('keys', null);
+    try {
+      if (saved && saved.priv && saved.pub) {
+        myKeys = { priv: await crypto.subtle.importKey('jwk', saved.priv, ECDH, false, ['deriveKey']), pub: saved.pub };
+        return myKeys;
+      }
+    } catch (_) { /* regenerate below */ }
+    const kp = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
+    const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+    const pub = b64(new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey)));
+    store.set('keys', { priv: privJwk, pub });
+    myKeys = { priv: await crypto.subtle.importKey('jwk', privJwk, ECDH, false, ['deriveKey']), pub };
+    return myKeys;
+  }
+
+  async function db(method, path, body) {
+    const res = await fetch(`${DB}/${path}.json`, {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body), // no JSON header: keeps POST a simple CORS request
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`db ${res.status}`);
+    return res.json();
+  }
+
+  async function publishKey() {
+    if (published || !mbReady()) return;
+    try {
+      const cur = await db('GET', `keys/${S.me.id}`);
+      if (cur == null) await db('PUT', `keys/${S.me.id}`, myKeys.pub);
+      else if (cur !== myKeys.pub) console.warn('rawaq: a different key is registered for this ID');
+      published = true;
+    } catch (_) { /* retried on the next start */ }
+  }
+
+  async function sharedKey(id) {
+    if (aesCache.has(id)) return aesCache.get(id);
+    let pub = pubCache.get(id);
+    if (!pub) {
+      const v = await db('GET', `keys/${id}`);
+      if (typeof v !== 'string' || v.length > 200) return null; // they haven't opened Rawaq since the mailbox existed
+      pub = v;
+      pubCache.set(id, pub);
+    }
+    const theirs = await crypto.subtle.importKey('raw', unb64(pub), ECDH, false, []);
+    const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: theirs }, myKeys.priv, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    aesCache.set(id, key);
+    return key;
+  }
+
+  async function mailboxSend(to, obj) {
+    if (!mbReady() || !isValidId(to) || isBlocked(to)) return false;
+    try {
+      const key = await sharedKey(to);
+      if (!key) return false;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const payload = { n: S.me.name, ph: S.me.photo ? hashStr(S.me.photo) : '', d: obj };
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8.encode(`${S.me.id}>${to}`) }, key, utf8.encode(JSON.stringify(payload)));
+      await db('POST', `inbox/${to}`, { f: S.me.id, iv: b64(iv), c: b64(new Uint8Array(ct)), t: Date.now() });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const mbBusy = new Set(); // message ids with a mailbox drop in flight
+
+  // Direct link if there is one, otherwise the mailbox.
+  async function post(id, obj) {
+    if (isOpen(id) && sendTo(id, obj)) return true;
+    return mailboxSend(id, obj);
+  }
+
+  // A new or retried message: direct when linked; otherwise mailbox now, link later.
+  function dispatch(id, m) {
+    if (isOpen(id) && sendTo(id, wireMsg(m))) return;
+    dial(id);
+    if (mbBusy.has(m.id)) return;
+    mbBusy.add(m.id);
+    mailboxSend(id, wireMsg(m)).then((ok) => {
+      mbBusy.delete(m.id);
+      if (!ok || m.st !== 'pending') return;
+      m.st = 'sent';
+      saveMsgs(id);
+      if (S.active === id) updateTick(m);
+    });
+  }
+
+  // pending messages whose mailbox drop failed (offline, recipient had no key yet, …)
+  function retryMailbox() {
+    if (!mbReady() || document.visibilityState === 'hidden') return;
+    for (const id of Object.keys(S.contacts)) {
+      if (isOpen(id) || isBlocked(id)) continue;
+      for (const m of msgsOf(id)) if (m.me && m.st === 'pending') dispatch(id, m);
+    }
+  }
+
+  let inboxChain = Promise.resolve();
+  const handledKeys = new Set();
+  async function handleEnvelope(key, v) {
+    if (handledKeys.has(key)) return;
+    handledKeys.add(key);
+    const drop = () => db('DELETE', `inbox/${S.me.id}/${encodeURIComponent(key)}`).catch(() => {});
+    if (!v || typeof v !== 'object' || typeof v.f !== 'string' || typeof v.c !== 'string' || typeof v.iv !== 'string') return drop();
+    const from = v.f;
+    if (!isValidId(from) || from === S.me.id || isBlocked(from) || v.c.length > 600000) return drop();
+    let payload = null;
+    for (let attempt = 0; attempt < 2 && !payload; attempt++) {
+      try {
+        const k = await sharedKey(from);
+        if (!k) break;
+        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(v.iv), additionalData: utf8.encode(`${from}>${S.me.id}`) }, k, unb64(v.c));
+        payload = JSON.parse(new TextDecoder().decode(pt));
+      } catch (_) {
+        aesCache.delete(from); // their key may have changed: refetch once
+        pubCache.delete(from);
+      }
+    }
+    if (payload && typeof payload === 'object' && payload.d && typeof payload.d === 'object') {
+      const name = cleanName(payload.n);
+      if (name) heardNames.set(from, name);
+      const ph = typeof payload.ph === 'string' ? payload.ph.slice(0, 16) : '';
+      heardPh.set(from, ph);
+      const c = S.contacts[from];
+      if (c) {
+        if (name && name !== c.name) { c.name = name; saveContacts(); refreshContact(from); }
+        if (ph && c.ph !== ph && payload.d.t !== 'avatar') post(from, { t: 'avatar?' });
+      }
+      try { onData(from, payload.d); } catch (e) { console.warn('rawaq: inbox item failed', e); }
+    }
+    return drop();
+  }
+
+  function onInboxEvent(ev) {
+    let d;
+    try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (!d || typeof d.path !== 'string') return;
+    const parts = d.path.split('/').filter(Boolean);
+    let items = [];
+    if (parts.length === 0 && d.data && typeof d.data === 'object') items = Object.entries(d.data);
+    else if (parts.length === 1 && d.data) items = [[parts[0], d.data]];
+    items.sort((a, b) => (a[0] < b[0] ? -1 : 1)); // push keys are chronological
+    for (const [k, v] of items) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
+  }
+
+  async function mbStart() {
+    if (!DB || es || !S.me || !owner) return;
+    try { await loadKeys(); } catch (_) { return; }
+    if (!mbReady() || es) return;
+    publishKey();
+    es = new EventSource(`${DB}/inbox/${S.me.id}.json`);
+    es.addEventListener('put', onInboxEvent);
+    es.addEventListener('patch', (ev) => {
+      let d;
+      try { d = JSON.parse(ev.data); } catch (_) { return; }
+      if (!d || !d.data || typeof d.data !== 'object') return;
+      for (const [k, v] of Object.entries(d.data).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+        if (v) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
+      }
+    });
+    es.addEventListener('cancel', () => mbStop());
+    for (const id of Object.keys(S.contacts)) flushReceipts(id);
+    setTimeout(retryMailbox, 1500);
+  }
+
+  function mbStop() {
+    if (es) { es.close(); es = null; }
   }
 
   // ---------------------------------------------------------------- protocol
@@ -483,7 +676,7 @@
         }
         if (c) {
           if (!ph && c.photo) { delete c.photo; delete c.ph; saveContacts(); refreshContact(id); }
-          else if (ph && c.ph !== ph) sendTo(id, { t: 'avatar?' });
+          else if (ph && c.ph !== ph) post(id, { t: 'avatar?' });
         }
         break;
       }
@@ -509,7 +702,7 @@
     const text = cleanText(d.text).trim();
     const media = cleanMedia(d.media);
     if (!text && !media) return;
-    sendTo(id, { t: 'ack', id: d.id });
+    post(id, { t: 'ack', id: d.id });
 
     const list = msgsOf(id);
     if (list.some((m) => m.id === d.id)) return; // duplicate after a retry
@@ -544,7 +737,7 @@
     updateTitle();
   }
 
-  const RANK = { pending: 0, delivered: 1, read: 2 };
+  const RANK = { pending: 0, sent: 1, delivered: 2, read: 3 };
   function markMine(id, ids, status) {
     const list = msgsOf(id);
     const want = new Set(ids.filter((x) => typeof x === 'string'));
@@ -568,6 +761,7 @@
     const data = S.me && S.me.photo;
     if (!data) return;
     const ph = hashStr(data);
+    if (!isOpen(id)) { mailboxSend(id, { t: 'avatar', ph, data }); return; } // the mailbox takes it whole
     const n = Math.ceil(data.length / AVATAR_PART);
     for (let i = 0; i < n; i++) {
       if (!sendTo(id, { t: 'avatar', ph, i, n, part: data.slice(i * AVATAR_PART, (i + 1) * AVATAR_PART) })) return;
@@ -610,7 +804,7 @@
   function flushOutbox(id) {
     let changed = false;
     for (const m of msgsOf(id)) {
-      if (m.me && m.st === 'pending' && !sendTo(id, wireMsg(m))) break;
+      if (m.me && (m.st === 'pending' || m.st === 'sent') && !sendTo(id, wireMsg(m))) break;
       if (m.rxp && sendTo(id, { t: 'react', id: m.id, e: (m.rx && m.rx.me) || '' })) { delete m.rxp; changed = true; }
     }
     if (changed) saveMsgs(id);
@@ -642,24 +836,25 @@
     const next = m.rx.me === e ? '' : e;
     if (next) m.rx.me = next; else delete m.rx.me;
     m.rxp = true;
-    if (sendTo(id, { t: 'react', id: m.id, e: next })) delete m.rxp;
     saveMsgs(id);
     refreshRow(m, true);
+    post(id, { t: 'react', id: m.id, e: next }).then((ok) => { if (ok && m.rx && (m.rx.me || '') === next) { delete m.rxp; saveMsgs(id); } });
   }
 
-  function flushReceipts(id) {
-    if (!isOpen(id)) return;
-    const list = msgsOf(id);
-    const pend = list.filter((m) => !m.me && m.seen && !m.rr);
+  const receiptsBusy = new Set();
+  async function flushReceipts(id) {
+    if ((!isOpen(id) && !mbReady()) || receiptsBusy.has(id) || isBlocked(id)) return;
+    const pend = msgsOf(id).filter((m) => !m.me && m.seen && !m.rr);
     if (!pend.length) return;
-    let changed = false;
-    for (let k = 0; k < pend.length; k += 200) {
-      const batch = pend.slice(k, k + 200);
-      if (!sendTo(id, { t: 'read', ids: batch.map((m) => m.id) })) break;
-      batch.forEach((m) => { m.rr = true; });
-      changed = true;
-    }
-    if (changed) saveMsgs(id);
+    receiptsBusy.add(id);
+    try {
+      for (let k = 0; k < pend.length; k += 200) {
+        const batch = pend.slice(k, k + 200);
+        if (!(await post(id, { t: 'read', ids: batch.map((m) => m.id) }))) break;
+        batch.forEach((m) => { m.rr = true; });
+        saveMsgs(id);
+      }
+    } finally { receiptsBusy.delete(id); }
   }
 
   function trim(list) {
@@ -681,8 +876,7 @@
     saveContacts();
     appendMessage(m, true);
     renderList();
-    if (isOpen(id)) sendTo(id, wireMsg(m));
-    else dial(id);
+    dispatch(id, m);
     renderBanner();
     chime('out');
   }
@@ -1159,7 +1353,8 @@
     uploading: ['cloud', 'جارٍ الرفع'],
     failed: ['alert', 'فشل الرفع'],
     pending: ['clock', 'بانتظار الإرسال'],
-    delivered: ['check', 'وصلت'],
+    sent: ['check', 'أُرسلت'],
+    delivered: ['checks', 'وصلت'],
     read: ['checks', 'قُرئت'],
   };
   function setTick(tk, st) {
@@ -1343,7 +1538,7 @@
   function unsendMsg(m) {
     const cid = S.active;
     if (!cid || !m.me || m.st === 'read') return;
-    const delivered = m.st === 'delivered';
+    const delivered = m.st === 'delivered' || m.st === 'sent'; // 'sent' = waiting in their mailbox
     deleteMsg(m, cid); // never-delivered messages just leave the outbox
     if (!delivered) { toast('تم حذف الرسالة لدى الجميع', { icon: 'check' }); return; }
     const copy = Object.assign({}, m);
@@ -1357,17 +1552,17 @@
   function flushUnsend(cid) {
     const q = unsendQ[cid];
     if (!q || !q.length) return;
-    for (const item of q) if (!sendTo(cid, { t: 'unsend', id: item.id })) break;
+    for (const item of q) post(cid, { t: 'unsend', id: item.id });
   }
 
   function onUnsend(cid, d) {
     if (typeof d.id !== 'string') return;
     const m = findMsg(cid, d.id);
-    if (!m) { sendTo(cid, { t: 'unsent', id: d.id }); return; } // already gone
+    if (!m) { post(cid, { t: 'unsent', id: d.id }); return; } // already gone
     if (m.me) return;                                            // only the sender may unsend
-    if (m.seen) { sendTo(cid, { t: 'unsend-no', id: d.id }); return; }
+    if (m.seen) { post(cid, { t: 'unsend-no', id: d.id }); return; }
     deleteMsg(m, cid);
-    sendTo(cid, { t: 'unsent', id: d.id });
+    post(cid, { t: 'unsent', id: d.id });
   }
 
   function onUnsendReply(cid, d) {
@@ -1402,6 +1597,7 @@
     if (!S.active) return;
     closeCtx(true);
     ctxHold = !!byTouch;
+    holdUntil = 0;
     ctxScroll = scroller.scrollTop;
     ctxMsg = m;
     heldRow = row;
@@ -1452,12 +1648,19 @@
 
   // the click synthesised from lifting the finger lands on whatever is under it
   // (usually the backdrop); swallow it so the menu stays open
-  const releaseHold = () => { if (ctxHold) setTimeout(() => { ctxHold = false; }, 350); };
+  let holdUntil = 0;
+  const releaseHold = () => { if (ctxHold && !holdUntil) holdUntil = Date.now() + 350; };
   window.addEventListener('touchend', releaseHold, true);
   window.addEventListener('pointerup', releaseHold, true);
   window.addEventListener('pointercancel', releaseHold, true);
   ctx.addEventListener('click', async (e) => {
-    if (ctxHold) { e.preventDefault(); e.stopPropagation(); return; }
+    if (ctxHold) {
+      // swallow only the one click that the lift itself produces
+      const fromLift = !holdUntil || Date.now() <= holdUntil;
+      ctxHold = false;
+      holdUntil = 0;
+      if (fromLift) { e.preventDefault(); e.stopPropagation(); return; }
+    }
     if (e.target.closest('[data-ctx-close]')) { closeCtx(); return; }
     const act = e.target.closest('[data-act]');
     if (!act || !ctxMsg) return;
@@ -1502,7 +1705,7 @@
       else retryUpload(m);
       return;
     }
-    const view = e.target.closest('[data-view]');
+    const view = e.target.closest('.media[data-view]');
     if (view) {
       const m = msgOfRow(view.closest('.msg'));
       if (m) openViewer(m);
@@ -1899,7 +2102,7 @@
       m.st = 'pending';
       saveMsgs(cid);
       if (S.active === cid) { refreshRow(m); renderBanner(); }
-      if (isOpen(cid)) sendTo(cid, wireMsg(m)); else dial(cid);
+      dispatch(cid, m);
     };
     xhr.send(fd);
     m.st = 'uploading';

@@ -238,8 +238,8 @@
     connecting: 'جارٍ الاتصال…',
     online: 'متصل',
     offline: 'لا يوجد إنترنت',
-    taken: 'مفتوح في مكان آخر — اضغط للمحاولة',
-    error: 'تعذّر الاتصال — اضغط للمحاولة',
+    taken: 'مفتوح في مكان آخر',
+    error: 'تعذّر الاتصال',
     unsupported: 'المتصفح لا يدعم الاتصال المباشر',
   };
 
@@ -1260,7 +1260,7 @@
     else if (p === 'online') { text = 'متصل الآن'; cls = 'on'; }
     else if (S.net !== 'online') text = S.net === 'offline' ? 'لا يوجد إنترنت' : 'جارٍ الاتصال…';
     else if (p === 'connecting' || p == null) text = 'جارٍ التحقق…';
-    else if (p === 'unreachable') text = 'تعذّر الوصول إليه الآن';
+    else if (p === 'unreachable') text = 'غير متصل';
     else if (c && c.seen) text = lastSeen(c.seen);
     else text = 'غير متصل';
 
@@ -1281,10 +1281,7 @@
     const c = S.contacts[id];
     const p = S.presence.get(id);
     let text = '';
-    if (S.net === 'offline') text = 'أنت غير متصل بالإنترنت. رسائلك محفوظة وبتنرسل أول ما يرجع الاتصال.';
-    else if (noKey.has(id) && p !== 'online' && msgsOf(id).some((m) => m.me && m.st === 'pending'))
-      text = `${nameOf(c)} لازم يفتح رواق مرة وحدة بالنسخة الجديدة عشان توصله رسائلك وهو مسكّر. رسالتك محفوظة وبتوصله.`;
-    else if (!c.name && !msgsOf(id).length && p && p !== 'online' && p !== 'connecting') text = 'ما قدرنا نوصل لهذا المعرّف الحين. تأكد منه، أو اطلب من صاحبه يفتح رواق.';
+    if (S.net === 'offline') text = 'لا يوجد اتصال بالإنترنت';
     if (text) $('#banner-text').textContent = text;
     wrap.classList.toggle('show', !!text);
   }
@@ -1333,7 +1330,7 @@
     setBadge(slot, c.id);
     title.appendChild(slot);
     wrap.appendChild(title);
-    wrap.appendChild(el('p', null, 'الرسائل تنتقل مباشرة ومشفّرة بين جهازيكما، ولا تُحفظ في أي خادم.'));
+    wrap.appendChild(el('p', null, 'الرسائل مشفّرة بين الطرفين'));
     return wrap;
   }
 
@@ -1667,7 +1664,7 @@
     if (at < 0) list.push(item.m); else list.splice(at, 0, item.m);
     saveMsgs(cid);
     if (S.active === cid) renderMessages(null, true);
-    toast(`ما انحذفت عند ${nameOf(S.contacts[cid])} لأنه قرأها`, { icon: 'alert', ms: 4000 });
+    toast('تعذّر الحذف لدى الجميع — تمت قراءتها', { icon: 'alert', ms: 3500 });
   }
 
   // ---------------------------------------------------------------- message menu
@@ -1754,12 +1751,12 @@
     if (act.dataset.act === 'reply') startReply(m);
     else if (act.dataset.act === 'copy') copyText(m.text, 'تم نسخ الرسالة');
     else if (act.dataset.act === 'unsend') {
-      if (m.st === 'read') { toast('ما تقدر تحذفها لدى الجميع — انقرأت', { icon: 'alert' }); return; }
-      const ok = await confirmBox('حذف لدى الجميع؟', 'بتنحذف من عندك ومن عنده، لأنه ما قرأها للحين.', 'حذف لدى الجميع');
+      if (m.st === 'read') { toast('تمت قراءتها', { icon: 'alert' }); return; }
+      const ok = await confirmBox('حذف لدى الجميع؟', '', 'حذف');
       if (ok) unsendMsg(m);
     }
     else if (act.dataset.act === 'delete') {
-      const ok = await confirmBox('حذف الرسالة؟', 'بتنحذف من جهازك فقط، وتبقى عند الطرف الثاني.', 'حذف');
+      const ok = await confirmBox('حذف الرسالة؟', '', 'حذف');
       if (ok) deleteMsg(m);
     }
   });
@@ -2090,7 +2087,7 @@
     const id = S.active;
     if (!file || !id || isBlocked(id)) return;
     if (!cloudReady()) {
-      toast('رفع الصور والفيديو يحتاج تفعيل التخزين السحابي في config.js', { icon: 'alert', ms: 5000 });
+      toast('رفع الوسائط غير متاح', { icon: 'alert' });
       return;
     }
     const kind = /^video\//.test(file.type) ? 'video' : /^image\//.test(file.type) ? 'image' : null;
@@ -2187,7 +2184,7 @@
       m.st = 'failed';
       saveMsgs(cid);
       if (S.active === cid) refreshRow(m);
-      toast(why ? `فشل الرفع: ${why}` : 'فشل رفع الملف — جرّب مرة ثانية', { icon: 'alert', ms: 4000 });
+      toast('فشل الرفع', { icon: 'alert' });
     };
     xhr.onerror = () => fail('');
     xhr.onload = () => {
@@ -2207,14 +2204,14 @@
       if (res.existing === true) {
         up.xhr = null;
         if (attempt < 2) { startUpload(cid, m, attempt + 1); return; }
-        fail('التخزين رجّع ملف قديم بدل ملفك — راجع إعدادات الـpreset');
+        fail('');
         return;
       }
       const media = cleanMedia({
         kind: m.media.kind, url: res.secure_url,
         w: res.width || m.media.w, h: res.height || m.media.h, dur: res.duration || m.media.dur,
       });
-      if (!media) { fail('رابط غير متوقع من التخزين'); return; }
+      if (!media) { fail(''); return; }
       up.xhr = null;
       up.blob = null; // keep the local preview so the bubble doesn't flicker
       m.media = media;
@@ -2306,7 +2303,7 @@
     $('#composer').hidden = blocked;
     $('#blocked-bar').hidden = !blocked;
     if (blocked) {
-      $('#blocked-text').textContent = `حظرت ${nameOf(S.contacts[id]) || id}. ما يقدر يراسلك ولا يشوف حالتك.`;
+      $('#blocked-text').textContent = `حظرت ${nameOf(S.contacts[id]) || id}`;
       cancelReply();
     }
   }
@@ -2374,8 +2371,8 @@
     const mine = S.me && id === S.me.id;
     const c = S.contacts[id];
     $('#vpop-text').textContent = mine
-      ? 'حسابك موثّق رسمياً في رواق.'
-      : `${nameOf(c) || id} حساب موثّق رسمياً في رواق. تقدر تطمّن إنك تكلّم الشخص الصحيح.`;
+      ? 'حسابك موثّق'
+      : (nameOf(c) || id);
     vAnchor = badge;
     vpop.hidden = false;
     const a = badge.getBoundingClientRect();
@@ -2658,7 +2655,7 @@
       try { ok = document.execCommand('copy'); } catch (__) { ok = false; }
       ta.remove();
     }
-    toast(ok ? msg : 'ما قدرنا ننسخ — انسخه يدوياً', { icon: ok ? 'check' : 'alert' });
+    toast(ok ? msg : 'تعذّر النسخ', { icon: ok ? 'check' : 'alert' });
   }
 
   const inviteLink = () => location.origin + location.pathname + '#to=' + S.me.id;
@@ -2727,6 +2724,7 @@
     return new Promise((resolve) => {
       $('#cf-title').textContent = title;
       $('#cf-text').textContent = text;
+      $('#cf-text').hidden = !text;
       const ok = $('#cf-ok');
       ok.textContent = okLabel;
       let answered = false;
@@ -2809,18 +2807,18 @@
 
   async function enableNotifications() {
     if (needsInstall()) {
-      toast('على الآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح رواق من هناك', { icon: 'alert', ms: 6000 });
+      toast('أضف رواق للشاشة الرئيسية أولاً', { icon: 'alert', ms: 4000 });
       return;
     }
     if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
     if (Notification.permission === 'default') {
       try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
     } else if (Notification.permission === 'denied') {
-      toast('فعّل التنبيهات من إعدادات المتصفح', { icon: 'alert' });
+      toast('التنبيهات محظورة من المتصفح', { icon: 'alert' });
     }
     if (Notification.permission === 'granted') {
       const ok = await ensurePush();
-      toast(ok || !pushConfigured() ? 'تم تفعيل التنبيهات' : 'تفعّلت التنبيهات داخل التطبيق فقط', { icon: 'check' });
+      toast('تم تفعيل التنبيهات', { icon: 'check' });
     }
     renderNotify();
     renderNotifCard();
@@ -2872,7 +2870,7 @@
     const id = normalizeId(raw);
     if (!id) return 'اكتب معرّف صديقك';
     if (!isValidId(id)) return `المعرّف غير صحيح — يتكوّن من ${ID_LEN} أحرف وأرقام إنجليزية`;
-    if (id === S.me.id) return 'هذا معرّفك أنت — اكتب معرّف صديقك';
+    if (id === S.me.id) return 'هذا معرّفك';
     ensureContact(id);
     openChat(id);
     return null;
@@ -2953,7 +2951,7 @@
         clearErr($('#new-err'));
         peerIn.focus({ preventScroll: true });
       } catch (_) {
-        toast('اسمح بالوصول للحافظة أو الصق يدوياً', { icon: 'alert' });
+        toast('تعذّر اللصق', { icon: 'alert' });
       }
     });
 
@@ -2984,7 +2982,7 @@
         try { evt.prompt(); await evt.userChoice; } catch (_) { /* ignore */ }
         renderInstall();
       } else if (isIOS) {
-        toast('اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»', { icon: 'alert', ms: 5000 });
+        toast('مشاركة ← إضافة إلى الشاشة الرئيسية', { icon: 'alert', ms: 4000 });
       }
     });
 
@@ -3027,7 +3025,7 @@
         toast(`ألغيت حظر ${nameOf(c)}`, { icon: 'check' });
         return;
       }
-      const ok = await confirmBox(`حظر ${nameOf(c)}؟`, 'ما يقدر يراسلك ولا يشوف إذا كنت متصل. تقدر تلغي الحظر متى ما بغيت.', 'حظر');
+      const ok = await confirmBox(`حظر ${nameOf(c)}؟`, '', 'حظر');
       if (!ok) return;
       setBlocked(id, true);
       toast(`تم حظر ${nameOf(c)}`, { icon: 'check' });
@@ -3042,7 +3040,7 @@
     // media
     $('#btn-attach').addEventListener('click', () => {
       if (!cloudReady()) {
-        toast('رفع الصور والفيديو يحتاج تفعيل التخزين السحابي في config.js', { icon: 'alert', ms: 5000 });
+        toast('رفع الوسائط غير متاح', { icon: 'alert' });
         return;
       }
       $('#in-media').click();
@@ -3131,7 +3129,7 @@
     $('#notif-on').addEventListener('click', enableNotifications);
     $('#notif-x').addEventListener('click', () => { store.set('notifDismissed', true); renderNotifCard(); });
     $('#btn-reset').addEventListener('click', async () => {
-      const ok = await confirmBox('حذف بياناتك؟', 'بينحذف اسمك ومعرّفك وكل محادثاتك من هذا الجهاز. ما تقدر تتراجع.', 'حذف نهائي');
+      const ok = await confirmBox('حذف بياناتك؟', 'لا يمكن التراجع', 'حذف');
       if (!ok) return;
       netStop();
       clearTimeout(saveTimer);
@@ -3159,7 +3157,7 @@
       const id = S.active;
       const c = S.contacts[id];
       if (!c) return;
-      const ok = await confirmBox('حذف المحادثة؟', `بتنحذف محادثتك مع ${nameOf(c)} من هذا الجهاز فقط.`, 'حذف');
+      const ok = await confirmBox('حذف المحادثة؟', '', 'حذف');
       if (!ok) return;
       closeChat();
       delete S.contacts[id];

@@ -709,7 +709,15 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .msg.me .swipe-hint { inset-inline-start: auto; inset-inline-end: -34px; }
 .swipe-hint .i { width: 16px; height: 16px; }
 
-.msg.held .bubble { transform: scale(1.03); box-shadow: var(--shadow-lg); transition: transform .3s var(--spring), box-shadow .3s; }
+.msg .bubble { transition: background-color .5s var(--ease), color .5s var(--ease), transform .5s var(--spring), filter .4s var(--ease), box-shadow .3s; }
+/* finger resting on a bubble: it sinks in gently over the long-press time */
+.msg.pressing .bubble {
+  transform: scale(.95) translateY(2px);
+  filter: brightness(.93);
+  transition: transform .45s cubic-bezier(.25, .8, .25, 1), filter .45s ease;
+}
+:root[data-theme="dark"] .msg.pressing .bubble { filter: brightness(.85); }
+.msg.held .bubble { transform: scale(1.03); box-shadow: var(--shadow-lg); transition: transform .35s var(--spring), box-shadow .3s; }
 .msg.flash .bubble { animation: flash 1.2s var(--ease); }
 @keyframes flash { 0%, 40% { box-shadow: 0 0 0 4px var(--line-2); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .msg.leave { animation: leave .28s var(--ease) both; }

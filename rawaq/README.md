@@ -79,7 +79,7 @@ cloud: { cloudName: 'dxyz123', uploadPreset: 'rawaq_unsigned' },
 1. **ولّد المفاتيح:** افتح `…/rawaq/tools/vapid.html` من موقعك واضغط «ولّد المفاتيح».
 2. **سوّ الـ Worker:** ادخل [dash.cloudflare.com](https://dash.cloudflare.com) (حساب مجاني) ← **Workers & Pages ← Create ← Create Worker**، سمّه `rawaq-push` واضغط **Deploy**، بعدين **Edit code** والصق محتوى `push/worker.js` كامل واضغط **Deploy**.
 3. **المتغيرات:** من **Settings ← Variables and Secrets** أضف:
-   - `DB_URL` = رابط Firebase (نفس اللي في `config.js`)
+   - `DB_URL` = اسم قاعدة Firebase (مثل `rawaq-b78a7-default-rtdb`) أو رابطها الكامل
    - `VAPID_PUBLIC` = المفتاح العام
    - `VAPID_PRIVATE_JWK` = المفتاح الخاص، **واختر النوع Secret**
    - (اختياري) `ALLOW_ORIGIN` = `https://necors.github.io`

@@ -11,6 +11,6 @@
 window.RAWAQ_CONFIG = Object.assign({
   cloud: {
     cloudName: 'ipz2vzxb',
-    uploadPreset: '',  // مثال: 'rawaq_unsigned'
+    uploadPreset: 'ml_default',
   },
 }, window.RAWAQ_CONFIG || {});

@@ -32,6 +32,17 @@
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
+      <!-- verified badge: two blended colours that slowly flow -->
+      <linearGradient id="vgrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#22d3ee"/>
+        <stop offset=".5" stop-color="#6366f1"/>
+        <stop offset="1" stop-color="#c026d3"/>
+        <animateTransform attributeName="gradientTransform" type="rotate" values="0 .5 .5;360 .5 .5" dur="7s" repeatCount="indefinite"/>
+      </linearGradient>
+      <symbol id="vbadge" viewBox="0 0 24 24">
+        <path fill="url(#vgrad)" d="M12 1.6l2.2 1.6 2.7-.2.9 2.6 2.3 1.4-.6 2.6 1.3 2.4-1.9 1.9.2 2.7-2.6.8-1.3 2.4-2.6-.6L12 22.4l-2.2-1.6-2.6.6-1.3-2.4-2.6-.8.2-2.7-1.9-1.9 1.3-2.4-.6-2.6 2.3-1.4.9-2.6 2.7.2Z"/>
+        <path d="m8.4 12.2 2.4 2.4 4.9-5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </symbol>
       <symbol id="arch" viewBox="0 0 48 48">
         <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
         <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
@@ -122,7 +133,7 @@
 
         <div class="me-card">
           <button class="me-card-main" type="button" data-copy-id aria-label="نسخ معرّفك">
-            <span class="me-card-label">معرّفك</span>
+            <span class="me-card-label">معرّفك <span class="vslot" id="me-badge"></span></span>
             <b class="me-card-id" dir="ltr" data-my-id></b>
           </button>
           <button class="icon-btn ghost" type="button" data-copy-id aria-label="نسخ المعرّف">
@@ -177,9 +188,9 @@
             <button class="icon-btn ghost back" id="btn-back" type="button" aria-label="رجوع">
               <svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
             </button>
-            <span class="avatar" id="c-avatar"><i class="dot"></i></span>
-            <div class="chat-who">
-              <b id="c-name" dir="auto"></b>
+            <span class="avatar head-open" id="c-avatar" role="button" tabindex="0" aria-label="عرض الملف الشخصي"><i class="dot"></i></span>
+            <div class="chat-who head-open" role="button" tabindex="0" aria-label="عرض الملف الشخصي">
+              <span class="who-line"><b id="c-name" dir="auto"></b><span class="vslot" id="c-badge"></span></span>
               <span class="status" id="c-status"></span>
             </div>
             <button class="icon-btn ghost" id="btn-chat-menu" type="button" aria-label="خيارات المحادثة">
@@ -244,6 +255,45 @@
             <div><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><b>أفلت الصورة أو الفيديو هنا</b></div>
           </div>
         </div>
+        <section class="profile" id="profile" aria-label="الملف الشخصي" hidden>
+          <div class="pf-bg"></div>
+          <div class="pf-scroll">
+            <div class="pf-bar">
+              <button class="icon-btn ghost" id="pf-close" type="button" aria-label="رجوع">
+                <svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+              </button>
+            </div>
+            <div class="pf-hero">
+              <span class="avatar pf-avatar" id="pf-avatar"><i class="dot"></i></span>
+              <h2 class="pf-name" id="pf-name-line"><span id="pf-name" dir="auto"></span><span class="vslot" id="pf-badge"></span></h2>
+              <p class="pf-status pf-rise" id="pf-status" style="--d:1"></p>
+            </div>
+            <div class="pf-actions pf-rise" style="--d:2">
+              <button type="button" id="pf-msg">
+                <svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l.9-4.4A8 8 0 1 1 20 12Z"/></svg>
+                <span>رسالة</span>
+              </button>
+              <button type="button" id="pf-copy">
+                <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
+                <span>نسخ المعرّف</span>
+              </button>
+              <button type="button" id="pf-block">
+                <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+                <span id="pf-block-label">حظر</span>
+              </button>
+            </div>
+            <div class="pf-card pf-rise" style="--d:3">
+              <div class="pf-row">
+                <span class="pf-row-label">المعرّف</span>
+                <b class="mono" dir="ltr" id="pf-id"></b>
+              </div>
+              <div class="pf-row pf-verified" id="pf-verified" hidden>
+                <span class="pf-row-label">التوثيق</span>
+                <span class="pf-v"><svg class="vbadge-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg> حساب موثّق رسمياً في رواق</span>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </section>
 
@@ -516,6 +566,21 @@
           <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Verified badge card -->
+  <div class="vpop" id="vpop" hidden>
+    <div class="vpop-backdrop" data-vpop-close></div>
+    <div class="vpop-card" id="vpop-card" role="dialog" aria-modal="true" aria-labelledby="vpop-title">
+      <div class="vpop-art">
+        <span class="vpop-glow"></span>
+        <span class="vpop-burst" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <svg class="vpop-badge" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg>
+      </div>
+      <b id="vpop-title">حساب موثّق</b>
+      <p id="vpop-text"></p>
+      <button class="btn btn-soft btn-block" type="button" data-vpop-close>حسناً</button>
     </div>
   </div>
 

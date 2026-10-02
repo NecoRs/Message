@@ -15,6 +15,7 @@
     dialTimeout: 12000,    // give up on a connection attempt after this long
     probeEvery: 30000,     // how often to check whether contacts came online
     mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
+    verified: ['QXYWNW'],  // IDs that get the verified badge
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
   const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
@@ -403,11 +404,24 @@
       }
     };
     conn.on('close', drop);
-    conn.on('error', () => { try { conn.close(); } catch (_) { /* ignore */ } drop(); });
+    conn.on('error', (err) => {
+      // an oversized message is rejected by PeerJS but the link itself is fine
+      if (err && err.type === 'message-too-big') return;
+      try { conn.close(); } catch (_) { /* ignore */ }
+      drop();
+    });
   }
 
+  // PeerJS's JSON channel refuses frames of ~16KB or more (and would report an error),
+  // so anything bigger must be split by the caller, like profile photos are.
+  const MAX_FRAME = 15000;
+  const utf8 = new TextEncoder();
   function send(conn, obj) {
-    try { conn.send(obj); return true; } catch (_) { return false; }
+    try {
+      if (utf8.encode(JSON.stringify(obj)).byteLength >= MAX_FRAME) return false;
+      conn.send(obj);
+      return true;
+    } catch (_) { return false; }
   }
   function sendTo(id, obj) {
     const set = conns.get(id);
@@ -473,18 +487,11 @@
         break;
       }
       case 'avatar?':
-        if (S.me.photo) sendTo(id, { t: 'avatar', ph: hashStr(S.me.photo), data: S.me.photo });
+        sendAvatar(id);
         break;
-      case 'avatar': {
-        const c = S.contacts[id];
-        if (!c || typeof d.data !== 'string' || d.data.length > 300000 || !PHOTO_RE.test(d.data)) break;
-        if (hashStr(d.data) !== d.ph) break;
-        c.photo = d.data;
-        c.ph = d.ph;
-        saveContacts();
-        refreshContact(id);
+      case 'avatar':
+        receiveAvatarPart(id, d);
         break;
-      }
       case 'msg': receive(id, d); break;
       case 'ack': if (typeof d.id === 'string') markMine(id, [d.id], 'delivered'); break;
       case 'read': if (Array.isArray(d.ids)) markMine(id, d.ids.slice(0, 2000), 'read'); break;
@@ -552,6 +559,44 @@
     }
   }
 
+  // Profile photos are sent in small parts and put back together on arrival.
+  const AVATAR_PART = 8000;
+  function sendAvatar(id) {
+    const data = S.me && S.me.photo;
+    if (!data) return;
+    const ph = hashStr(data);
+    const n = Math.ceil(data.length / AVATAR_PART);
+    for (let i = 0; i < n; i++) {
+      if (!sendTo(id, { t: 'avatar', ph, i, n, part: data.slice(i * AVATAR_PART, (i + 1) * AVATAR_PART) })) return;
+    }
+  }
+
+  const avatarParts = new Map(); // id -> { ph, n, parts, got }
+  function receiveAvatarPart(id, d) {
+    const c = S.contacts[id];
+    if (!c || typeof d.ph !== 'string' || d.ph.length > 16) return;
+    let data = null;
+    if (typeof d.data === 'string') {
+      data = d.data; // single-frame form
+    } else {
+      const n = d.n;
+      const i = d.i;
+      if (!Number.isInteger(n) || n < 1 || n > 40 || !Number.isInteger(i) || i < 0 || i >= n) return;
+      if (typeof d.part !== 'string' || d.part.length > AVATAR_PART) return;
+      let a = avatarParts.get(id);
+      if (!a || a.ph !== d.ph || a.n !== n) { a = { ph: d.ph, n, parts: new Array(n), got: 0 }; avatarParts.set(id, a); }
+      if (a.parts[i] == null) { a.parts[i] = d.part; a.got++; }
+      if (a.got < n) return;
+      avatarParts.delete(id);
+      data = a.parts.join('');
+    }
+    if (data.length > 300000 || !PHOTO_RE.test(data) || hashStr(data) !== d.ph) return;
+    c.photo = data;
+    c.ph = d.ph;
+    saveContacts();
+    refreshContact(id);
+  }
+
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
     if (m.re) o.re = { id: m.re.id, text: m.re.text, by: m.re.me ? 's' : 'r' };
@@ -604,10 +649,14 @@
     const list = msgsOf(id);
     const pend = list.filter((m) => !m.me && m.seen && !m.rr);
     if (!pend.length) return;
-    if (sendTo(id, { t: 'read', ids: pend.map((m) => m.id) })) {
-      pend.forEach((m) => { m.rr = true; });
-      saveMsgs(id);
+    let changed = false;
+    for (let k = 0; k < pend.length; k += 200) {
+      const batch = pend.slice(k, k + 200);
+      if (!sendTo(id, { t: 'read', ids: batch.map((m) => m.id) })) break;
+      batch.forEach((m) => { m.rr = true; });
+      changed = true;
     }
+    if (changed) saveMsgs(id);
   }
 
   function trim(list) {
@@ -707,6 +756,7 @@
     $('#p-avatar').classList.toggle('ink', !S.me.photo);
     $('#btn-photo-remove').hidden = !S.me.photo;
     $('#id-hello').textContent = S.me.name;
+    setBadge($('#me-badge'), S.me.id);
   }
 
   function refreshContact(id) {
@@ -785,7 +835,7 @@
     const name = el('b', 'item-name');
     name.dir = 'auto';
     const time = el('span', 'item-time');
-    top.append(name, time);
+    top.append(name, el('span', 'vslot'), time);
     const bottom = el('span', 'item-bottom');
     const prev = el('span', 'item-preview');
     prev.dir = 'auto';
@@ -803,6 +853,7 @@
     setAvatar(av, c);
     av.classList.toggle('online', S.presence.get(c.id) === 'online' && !isBlocked(c.id));
     $('.item-name', b).textContent = nameOf(c);
+    setBadge($('.vslot', b), c.id);
     $('.item-time', b).textContent = c.last ? listTime(c.last.ts) : '';
     const prev = $('.item-preview', b);
     const typing = S.typing.has(c.id);
@@ -872,6 +923,7 @@
   function leaveChat() {
     const id = S.active;
     if (!id) return;
+    closeProfile(true);
     S.drafts[id] = input.value;
     stopTyping(id);
     cancelReply();
@@ -915,6 +967,7 @@
     if (!id) return;
     const c = S.contacts[id];
     $('#c-name').textContent = nameOf(c);
+    setBadge($('#c-badge'), id);
     const av = $('#c-avatar');
     setAvatar(av, c);
     av.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
@@ -995,7 +1048,11 @@
     const av = el('span', 'avatar');
     setAvatar(av, c);
     wrap.appendChild(av);
-    wrap.appendChild(el('b', null, c.name ? `ابدأ الحديث مع ${c.name}` : `المعرّف ${c.id}`));
+    const title = el('b', null, c.name ? `ابدأ الحديث مع ${c.name}` : `المعرّف ${c.id}`);
+    const slot = el('span', 'vslot');
+    setBadge(slot, c.id);
+    title.appendChild(slot);
+    wrap.appendChild(title);
     wrap.appendChild(el('p', null, 'الرسائل تنتقل مباشرة ومشفّرة بين جهازيكما، ولا تُحفظ في أي خادم.'));
     return wrap;
   }
@@ -1836,7 +1893,7 @@
     }
     store.set('blocked', S.blocked);
     renderList();
-    if (S.active === id) { renderComposer(); renderChatHead(true); renderBanner(); }
+    if (S.active === id) { renderComposer(); renderChatHead(true); renderBanner(); if (!profileEl.hidden) fillProfile(); }
     if (!on) dial(id);
   }
 
@@ -1877,6 +1934,181 @@
       ul.appendChild(li);
     }
   }
+
+  // ---------------------------------------------------------------- verified badge
+
+  const VERIFIED = new Set((CFG.verified || []).map(normalizeId).filter(isValidId));
+  const isVerified = (id) => VERIFIED.has(id);
+
+  function setBadge(slot, id) {
+    if (!slot) return;
+    const on = !!id && isVerified(id);
+    if (on && !slot.firstChild) {
+      const b = el('span', 'vbadge');
+      b.setAttribute('role', 'button');
+      b.tabIndex = 0;
+      b.dataset.vid = id;
+      b.setAttribute('aria-label', 'حساب موثّق');
+      b.innerHTML = '<svg class="vbadge-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#vbadge"/></svg>';
+      slot.appendChild(b);
+    } else if (on) {
+      slot.firstChild.dataset.vid = id;
+    } else if (!on && slot.firstChild) {
+      slot.textContent = '';
+    }
+  }
+
+  const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+  const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Telegram-style: the card rises up out of the badge you tapped.
+  const vpop = $('#vpop');
+  const vcard = $('#vpop-card');
+  let vAnchor = null;
+  function showBadgePop(badge) {
+    const id = badge.dataset.vid;
+    const mine = S.me && id === S.me.id;
+    const c = S.contacts[id];
+    $('#vpop-text').textContent = mine
+      ? 'حسابك موثّق رسمياً في رواق.'
+      : `${nameOf(c) || id} حساب موثّق رسمياً في رواق. تقدر تطمّن إنك تكلّم الشخص الصحيح.`;
+    vAnchor = badge;
+    vpop.hidden = false;
+    const a = badge.getBoundingClientRect();
+    const w = vcard.offsetWidth;
+    const h = vcard.offsetHeight;
+    const vw = document.documentElement.clientWidth;
+    const vh = $('#app').clientHeight;
+    const ax = a.left + a.width / 2;
+    let left = Math.max(12, Math.min(vw - w - 12, ax - w / 2));
+    // sit above the badge when there is room, otherwise centred on screen
+    let top = a.top - h - 14;
+    if (top < 12) top = Math.max(12, (vh - h) / 2);
+    vcard.style.left = left + 'px';
+    vcard.style.top = top + 'px';
+    vcard.style.transformOrigin = `${ax - left}px 100%`;
+    vpop.classList.remove('closing');
+    void vpop.offsetWidth;
+    vpop.classList.add('open');
+    if (!reduceMotion()) {
+      // always rises upward, easing in with a soft spring
+      vcard.animate([
+        { opacity: 0, transform: 'translateY(70px) scale(.55)' },
+        { opacity: 1, offset: 0.4 },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 680, easing: SPRING, fill: 'both' });
+    }
+    if (isTouch && navigator.vibrate) { try { navigator.vibrate(10); } catch (_) { /* ignore */ } }
+    setTimeout(() => { const f = $('[data-vpop-close].btn', vcard); if (f && !isTouch) f.focus({ preventScroll: true }); }, 80);
+  }
+  function closeBadgePop() {
+    if (vpop.hidden) return;
+    vpop.classList.remove('open');
+    vpop.classList.add('closing');
+    const done = () => { if (!vpop.classList.contains('open')) vpop.hidden = true; };
+    if (reduceMotion()) { done(); return; }
+    const anim = vcard.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(.9)' }],
+      { duration: 200, easing: 'ease-in', fill: 'both' });
+    anim.onfinish = done;
+    if (vAnchor && !isTouch) vAnchor.focus({ preventScroll: true });
+  }
+  vpop.addEventListener('click', (e) => { if (e.target.closest('[data-vpop-close]')) closeBadgePop(); });
+  // capture phase so a badge inside a chat row doesn't also open the chat
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.vbadge');
+    if (!b) return;
+    e.preventDefault();
+    e.stopPropagation();
+    showBadgePop(b);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('vbadge')) {
+      e.preventDefault();
+      e.stopPropagation();
+      showBadgePop(e.target);
+    }
+  }, true);
+
+  // ---------------------------------------------------------------- profile panel
+
+  // Telegram-style shared element transition: the header avatar and name
+  // grow and glide up into the profile, and back down on close.
+  const profileEl = $('#profile');
+  const pfAvatar = $('#pf-avatar');
+  const pfName = $('#pf-name-line');
+
+  function fillProfile() {
+    const id = S.active;
+    const c = S.contacts[id];
+    if (!c) return;
+    setAvatar(pfAvatar, c);
+    pfAvatar.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
+    $('#pf-name').textContent = nameOf(c);
+    setBadge($('#pf-badge'), id);
+    $('#pf-status').textContent = $('#c-status').textContent;
+    $('#pf-id').textContent = id;
+    $('#pf-verified').hidden = !isVerified(id);
+    $('#pf-block-label').textContent = isBlocked(id) ? 'إلغاء الحظر' : 'حظر';
+  }
+
+  function flip(fromEl, toEl, back) {
+    const a = fromEl.getBoundingClientRect();
+    const b = toEl.getBoundingClientRect();
+    if (!a.width || !b.width) return null;
+    const dx = a.left + a.width / 2 - (b.left + b.width / 2);
+    const dy = a.top + a.height / 2 - (b.top + b.height / 2);
+    const sc = a.height / b.height;
+    const start = `translate(${dx}px, ${dy}px) scale(${sc})`;
+    const frames = back ? [{ transform: 'none' }, { transform: start }] : [{ transform: start }, { transform: 'none' }];
+    return toEl.animate(frames, { duration: back ? 420 : 620, easing: EASE, fill: 'both' });
+  }
+
+  let profileAnim = null;
+  function openProfile() {
+    if (!S.active || !profileEl.hidden) return;
+    fillProfile();
+    profileEl.hidden = false;
+    $('.pf-scroll', profileEl).scrollTop = 0;
+    void profileEl.offsetWidth;
+    profileEl.classList.add('open');
+    if (!reduceMotion()) {
+      flip($('#c-avatar'), pfAvatar, false);
+      profileAnim = flip($('#c-name'), pfName, false);
+    }
+    $('.chat-head').classList.add('under-profile');
+    setTimeout(() => { if (!isTouch) $('#pf-close').focus({ preventScroll: true }); }, 50);
+  }
+
+  function closeProfile(instant) {
+    if (profileEl.hidden) return;
+    profileEl.classList.remove('open');
+    $('.chat-head').classList.remove('under-profile');
+    const finish = () => {
+      if (profileEl.classList.contains('open')) return;
+      profileEl.hidden = true;
+      pfAvatar.getAnimations().forEach((a) => a.cancel());
+      pfName.getAnimations().forEach((a) => a.cancel());
+    };
+    if (instant || reduceMotion()) { finish(); return; }
+    flip($('#c-avatar'), pfAvatar, true);
+    const anim = flip($('#c-name'), pfName, true);
+    if (anim) anim.onfinish = finish; else setTimeout(finish, 420);
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.head-open')) openProfile();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('head-open')) openProfile();
+  });
+  $('#pf-close').addEventListener('click', () => closeProfile());
+  $('#pf-msg').addEventListener('click', () => {
+    closeProfile();
+    if (!isTouch && !isBlocked(S.active)) setTimeout(() => input.focus({ preventScroll: true }), 300);
+  });
+  $('#pf-copy').addEventListener('click', () => { if (S.active) copyText(S.active, 'تم نسخ المعرّف'); });
+  $('#pf-block').addEventListener('click', () => $('#btn-block').click());
 
   // ---------------------------------------------------------------- feedback
 
@@ -2080,6 +2312,8 @@
     }
     if (e.key !== 'Escape') return;
     if (!viewer.hidden) { closeViewer(); return; }
+    if (!vpop.hidden) { closeBadgePop(); return; }
+    if (!profileEl.hidden) { closeProfile(); return; }
     if (!ctx.hidden) { closeCtx(); return; }
     if (S.reply && document.activeElement === input) { cancelReply(); return; }
     if (openM) closeModal();

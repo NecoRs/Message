@@ -163,11 +163,12 @@ const BINARIES = [
 
 function buildTree() {
   const pictures = {};
+  const imageName = (w) => w.id + w.file.slice(w.file.lastIndexOf('.'));
   for (const w of WALLPAPERS) {
-    pictures[`${w.id}.svg`] = F('', { mtime: BOOT - 86400000 * 2, extra: { image: w.id, binary: true, size: 98304 } });
+    pictures[imageName(w)] = F('', { mtime: BOOT - 86400000 * 2, extra: { image: w.id, binary: true, size: w.size ?? 98304 } });
   }
   const backgrounds = {};
-  for (const w of WALLPAPERS) backgrounds[`${w.id}.svg`] = F('', { extra: { image: w.id, binary: true, size: 98304 } });
+  for (const w of WALLPAPERS) backgrounds[imageName(w)] = F('', { extra: { image: w.id, binary: true, size: w.size ?? 98304 } });
 
   const usrbin = {};
   for (const b of BINARIES) usrbin[b] = BIN(40000 + ((b.length * 7919) % 900000));

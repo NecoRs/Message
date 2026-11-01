@@ -4,16 +4,18 @@
 // chatters, and follows the Phantom volume / mute / enable settings.
 
 const PHRASES = {
-  online: ['System online.', 'Phantom online.', 'All systems nominal.'],
-  operation: ['New operation.', 'Initializing sequence.', 'Standby for operation.'],
-  processing: ['Processing.', 'Processing data streams.', 'Working.'],
-  analysis: ['Analyzing.', 'Running analysis.', 'Scanning.'],
-  complete: ['Operation complete.', 'Access granted.', 'Report ready.', 'Sequence complete.'],
-  warning: ['Warning. Anomaly detected.', 'Warning.', 'Alert. Anomaly flagged.'],
-  denied: ['Access denied.', 'Integrity check failed.', 'Error detected.'],
+  online: ['System online.', 'Phantom online.', 'We are in.', 'Ghost protocol active.'],
+  operation: ['New operation.', 'Infiltration sequence.', 'Breaching the perimeter.', 'Standby. Going dark.'],
+  processing: ['Processing.', 'Harvesting data.', 'Decrypting.', 'Working in the shadows.'],
+  analysis: ['Analyzing.', 'Scanning targets.', 'Mapping the network.', 'Tracing.'],
+  complete: ['Access granted.', 'Operation complete.', 'Data exfiltrated.', 'We were never here.'],
+  warning: ['Warning. Intrusion detected.', 'Warning. We are being traced.', 'Alert. Countermeasures active.'],
+  denied: ['Access denied.', 'Firewall engaged.', 'Lockout. Retrying.'],
 };
 
-const FEMALE_HINTS = /female|woman|samantha|zira|susan|victoria|karen|moira|tessa|fiona|serena|google uk english female|google us english|aria|jenny|sonia|catherine|hazel/i;
+// Prefer an actual robot/computer voice; otherwise any voice, pitched down.
+const ROBOT_HINTS = /zarvox|trinoids|cellos|robot|android|cyber|whisper|bells|boing|bad news|wobble/i;
+const FEMALE_HINTS = /female|woman|samantha|zira|susan|victoria|karen|moira|tessa|fiona|serena|aria|jenny|sonia|catherine|hazel|google us english|google uk english female/i;
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
@@ -43,7 +45,8 @@ export class Voice {
     if (!voices.length) return;
     const en = voices.filter((v) => /^en(-|_|$)/i.test(v.lang));
     const pool = en.length ? en : voices;
-    this.voice = pool.find((v) => FEMALE_HINTS.test(v.name))
+    this.voice = voices.find((v) => ROBOT_HINTS.test(v.name))   // a real robot voice, any language
+      || pool.find((v) => FEMALE_HINTS.test(v.name))
       || pool.find((v) => /en-GB/i.test(v.lang))
       || pool.find((v) => /en-US/i.test(v.lang))
       || pool[0];
@@ -74,8 +77,9 @@ export class Voice {
       const u = new SpeechSynthesisUtterance(text);
       u.voice = this.voice;
       u.lang = this.voice.lang || 'en-US';
-      u.rate = 0.92;
-      u.pitch = 1.08;
+      // deep, slow and monotone => a classic robot/computer voice
+      u.rate = 0.8;
+      u.pitch = 0.4;
       u.volume = Math.min(1, Math.pow(this.prefs.volume / 100, 1.3));
       this.synth.speak(u);
     } catch {

@@ -23,45 +23,90 @@ import numpy as np
 RATE = 44100
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'sounds')
 
-# A harsher, digital "ops-room" set: glitch keystrokes, laser-zap execute,
-# metallic alarms, deep-impact errors, electric sweeps and an ominous swell.
-# output name -> (pack, file, options)
+# A dark, menacing "black-hat" set. Everything is pitched down and driven
+# into soft distortion for a deeper, dirtier, more ominous character.
+# options: pitch (resample factor, <1 = deeper), drive (distortion),
+#          crush (bit-depth), lowpass/highpass (Hz), tail (reverb seconds), peak
 ONE_SHOTS = {
-    'type-1': ('ui', 'glitch_001.wav', {'peak': -5.0}),
-    'type-2': ('ui', 'glitch_002.wav', {'peak': -5.0}),
-    'type-3': ('ui', 'glitch_004.wav', {'peak': -5.0}),
-    'type-4': ('ui', 'glitch_003.wav', {'peak': -5.0}),
-    'type-5': ('ui', 'tick_002.wav', {'peak': -5.0}),
-    'tick': ('ui', 'glitch_003.wav', {'peak': -4.0}),
-    'row-1': ('ui', 'glitch_004.wav', {'peak': -4.0}),
-    'row-2': ('ui', 'drop_002.wav', {'peak': -5.0}),
-    'blip': ('ui', 'glitch_002.wav', {'peak': -3.0}),
-    'success-1': ('ui', 'confirmation_002.wav', {}),
-    'success-2': ('ui', 'confirmation_003.wav', {}),
-    'warning': ('fx', 'impact_metal_004.ogg', {'lowpass': 2600, 'peak': -3.0}),
-    'error': ('fx', 'impact_metal_002.ogg', {'lowpass': 2200, 'peak': -2.0}),
-    'sweep-1': ('fx', 'force_field_000.ogg', {'peak': -3.0}),
-    'sweep-2': ('fx', 'force_field_002.ogg', {'peak': -3.0}),
-    'sweep-3': ('fx', 'door_open_000.ogg', {}),
-    'boot': ('fx', 'low_frequency_explosion_001.ogg', {'peak': -2.0}),
+    'type-1': ('ui', 'glitch_001.wav', {'pitch': 0.82, 'drive': 2.4, 'peak': -5.0}),
+    'type-2': ('ui', 'glitch_002.wav', {'pitch': 0.82, 'drive': 2.4, 'peak': -5.0}),
+    'type-3': ('ui', 'glitch_004.wav', {'pitch': 0.8, 'drive': 2.4, 'peak': -5.0}),
+    'type-4': ('ui', 'glitch_003.wav', {'pitch': 0.8, 'drive': 2.4, 'peak': -5.0}),
+    'type-5': ('ui', 'tick_002.wav', {'pitch': 0.82, 'drive': 2.0, 'peak': -5.0}),
+    'tick': ('ui', 'glitch_003.wav', {'pitch': 0.8, 'drive': 2.0, 'peak': -4.0}),
+    'row-1': ('ui', 'glitch_004.wav', {'pitch': 0.78, 'drive': 2.2, 'peak': -4.0}),
+    'row-2': ('ui', 'drop_002.wav', {'pitch': 0.78, 'drive': 2.0, 'peak': -5.0}),
+    'blip': ('ui', 'glitch_002.wav', {'pitch': 0.76, 'drive': 2.6, 'peak': -3.0}),
+    'success-1': ('ui', 'confirmation_002.wav', {'pitch': 0.78, 'drive': 1.6, 'lowpass': 5200, 'peak': -2.0}),
+    'success-2': ('ui', 'confirmation_003.wav', {'pitch': 0.76, 'drive': 1.6, 'lowpass': 5200, 'peak': -2.0}),
+    'warning': ('fx', 'impact_metal_004.ogg', {'pitch': 0.74, 'drive': 3.0, 'lowpass': 2200, 'tail': 0.5, 'peak': -2.0}),
+    'error': ('fx', 'impact_metal_002.ogg', {'pitch': 0.6, 'drive': 3.5, 'lowpass': 1700, 'tail': 0.7, 'peak': -1.0}),
+    'sweep-1': ('fx', 'force_field_000.ogg', {'pitch': 0.72, 'drive': 1.8, 'lowpass': 3200, 'peak': -2.0}),
+    'sweep-2': ('fx', 'force_field_002.ogg', {'pitch': 0.72, 'drive': 1.8, 'lowpass': 3200, 'peak': -2.0}),
+    'sweep-3': ('fx', 'low_frequency_explosion_000.ogg', {'pitch': 0.8, 'drive': 1.5, 'lowpass': 2600, 'tail': 0.6, 'peak': -3.0}),
+    'stinger': ('fx', 'impact_metal_001.ogg', {'pitch': 0.55, 'drive': 3.0, 'lowpass': 1400, 'tail': 1.1, 'peak': -1.0}),
+    'boot': ('fx', 'low_frequency_explosion_001.ogg', {'pitch': 0.62, 'drive': 2.0, 'lowpass': 2200, 'tail': 0.8, 'peak': -1.0}),
 }
-# "digital execute": a retro laser zap with a glitch transient in front
+# "digital execute": a deep, distorted retro laser zap with a glitch in front
 LAYERED = {
-    'execute': [('ui', 'glitch_002.wav', 0.0, 0.8), ('fx', 'laser_retro_000.ogg', 0.015, 0.9)],
+    'execute': [('ui', 'glitch_002.wav', 0.0, 0.8, {'pitch': 0.8, 'drive': 3.0}),
+                ('fx', 'laser_retro_000.ogg', 0.015, 0.9, {'pitch': 0.68, 'drive': 2.6, 'lowpass': 4000})],
 }
 LOOPS = {
-    'loop-processing': ('fx', 'computer_noise_002.ogg', {'lowpass': 7000, 'peak': -4.0}),
-    'loop-ambience': ('fx', 'space_engine_low_001.ogg', {'lowpass': 760, 'peak': -4.0}),
+    'loop-processing': ('fx', 'computer_noise_002.ogg', {'pitch': 0.9, 'drive': 1.6, 'lowpass': 5200, 'peak': -4.0}),
+    'loop-ambience': ('fx', 'space_engine_low_001.ogg', {'pitch': 0.68, 'drive': 1.4, 'lowpass': 520, 'dread': True, 'peak': -3.0}),
 }
 
 
-def load(path, lowpass=None):
-    cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-i', path]
-    if lowpass:
-        cmd += ['-af', f'lowpass=f={lowpass}']
-    cmd += ['-ac', '1', '-ar', str(RATE), '-f', 'f32le', '-']
+def load(path):
+    cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-i', path,
+           '-ac', '1', '-ar', str(RATE), '-f', 'f32le', '-']
     raw = subprocess.run(cmd, capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32).astype(np.float64)
+
+
+def _filter(x, lo=None, hi=None):
+    spec = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / RATE)
+    if hi:
+        spec[f > hi] = 0
+    if lo:
+        spec[f < lo] = 0
+    return np.fft.irfft(spec, len(x))
+
+
+def shape(x, opt):
+    """Darkens a sound: pitch down (resample), soft-clip distortion, optional
+    bit-crush, band limits, a short decaying tail and a dread sub-layer."""
+    pitch = opt.get('pitch', 1.0)
+    if pitch and pitch != 1.0:                       # resample => lower + longer
+        idx = np.arange(0, len(x), pitch)
+        x = np.interp(idx, np.arange(len(x)), x)
+    if opt.get('highpass') or opt.get('lowpass'):
+        x = _filter(x, opt.get('highpass'), opt.get('lowpass'))
+    drive = opt.get('drive')
+    if drive:                                        # tanh soft clipping
+        x = np.tanh(drive * x) / np.tanh(drive)
+    crush = opt.get('crush')
+    if crush:                                        # quantise to N bits
+        levels = 2 ** crush
+        x = np.round(x * levels) / levels
+    tail = opt.get('tail')
+    if tail:                                         # cheap decaying reverb tail
+        n = int(tail * RATE)
+        out = np.zeros(len(x) + n)
+        out[:len(x)] = x
+        for delay, gain in ((0.035, 0.5), (0.07, 0.32), (0.13, 0.2), (0.21, 0.12)):
+            d = int(delay * RATE)
+            decay = gain * np.exp(-np.arange(len(x)) / (tail * RATE * 0.6))
+            out[d:d + len(x)] += x * decay
+        x = out
+    if opt.get('dread'):                             # add a dissonant low sub
+        t = np.arange(len(x)) / RATE
+        sub = 0.22 * np.sin(2 * np.pi * 36 * t) + 0.12 * np.sin(2 * np.pi * 54.5 * t)
+        sub *= 0.5 + 0.5 * np.sin(2 * np.pi * 0.09 * t)   # slow throb
+        x = x + sub
+    return x
 
 
 def trim(x, threshold_db=-50.0):
@@ -161,11 +206,11 @@ def main():
         print(write_mp3(f'radio-{i}', radio_burst(1000 + i), '96k'))
 
     for name, (pack, f, opt) in ONE_SHOTS.items():
-        x = normalise(fade(trim(load(src(pack, f)))), opt.get('peak', -1.0))
-        print(write_mp3(name, x, '96k'))
+        x = fade(shape(trim(load(src(pack, f))), opt))
+        print(write_mp3(name, normalise(x, opt.get('peak', -1.0)), '96k'))
 
     for name, layers in LAYERED.items():
-        parts = [(trim(load(src(p, f))), int(d * RATE), g) for p, f, d, g in layers]
+        parts = [(shape(trim(load(src(p, f))), o), int(d * RATE), g) for p, f, d, g, o in layers]
         n = max(len(x) + d for x, d, _ in parts)
         mix = np.zeros(n)
         for x, d, g in parts:
@@ -173,7 +218,7 @@ def main():
         print(write_mp3(name, normalise(fade(mix)), '96k'))
 
     for name, (pack, f, opt) in LOOPS.items():
-        x = load(src(pack, f), opt.get('lowpass'))
+        x = shape(load(src(pack, f)), opt)
         x = normalise(seamless(x), opt.get('peak', -3.0))
         print(write_mp3(name, x, '128k'))
 

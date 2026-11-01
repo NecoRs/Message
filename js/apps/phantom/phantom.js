@@ -674,7 +674,7 @@ class PhantomConsole {
       const sc = this.manager.next();
       this.scenario = sc;
       this.scnEl.textContent = sc.name;
-      this.audio.sfx('sweep', { level: 0.5 });
+      this.audio.sfx('stinger', { level: 0.6 });
       this.voice.say('operation');
       const ctx = new ScenarioContext(this, sc, sl);
       await sc.run(ctx);

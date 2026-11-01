@@ -17,6 +17,7 @@ const EFFECTS = {
   warning: { files: ['warning'], gain: 0.55, gap: 200 },
   error: { files: ['error'], gain: 0.55, gap: 200 },
   sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.4, gap: 150 },
+  stinger: { files: ['stinger'], gain: 0.5, gap: 800 },
   boot: { files: ['boot'], gain: 0.6, gap: 500 },
   radio: { files: ['radio-1', 'radio-2', 'radio-3'], gain: 0.42, gap: 400 },
 };

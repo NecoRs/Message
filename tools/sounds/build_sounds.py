@@ -114,12 +114,51 @@ def write_mp3(name, x, bitrate='128k'):
     return out
 
 
+def bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec[(f < lo) | (f > hi)] = 0
+    return np.fft.irfft(spec, len(x))
+
+
+def radio_burst(seed):
+    """A synthesised police/comms radio squelch: open click, band-limited
+    static with crackle, close click, and (sometimes) a roger beep. No voice,
+    no sample — generated here, so it is free of any third-party audio."""
+    rng = np.random.default_rng(seed)
+    click = lambda ms, lo, hi: bandpass(rng.standard_normal(int(ms / 1000 * RATE)), lo, hi)
+    open_click = click(10, 1500, 6500) * np.linspace(1, 0, int(0.01 * RATE)) ** 1.5
+    body_len = int(rng.uniform(0.18, 0.46) * RATE)
+    body = bandpass(rng.standard_normal(body_len), 340, 2900)
+    t = np.arange(body_len) / RATE
+    body *= 0.6 + 0.4 * np.sin(2 * np.pi * rng.uniform(18, 34) * t)  # tremolo
+    for _ in range(rng.integers(3, 9)):  # crackle pops
+        p = rng.integers(0, body_len)
+        body[p:p + 40] += rng.uniform(0.5, 1.2) * np.hanning(min(40, body_len - p))
+    env = np.ones(body_len)
+    a, d = int(0.006 * RATE), int(0.03 * RATE)
+    env[:a] = np.linspace(0, 1, a)
+    env[-d:] = np.linspace(1, 0, d)
+    body *= env * 0.5
+    close_click = click(7, 1200, 5000) * np.linspace(1, 0, int(0.007 * RATE)) ** 1.5
+    parts = [open_click, body, close_click]
+    if rng.random() < 0.5:  # roger beep
+        n = int(0.06 * RATE)
+        beep = np.sin(2 * np.pi * rng.choice([1100, 1300, 1500]) * np.arange(n) / RATE)
+        beep *= np.hanning(n) * 0.35
+        parts += [np.zeros(int(0.02 * RATE)), beep]
+    return normalise(np.concatenate(parts), -6.0)
+
+
 def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
     packs = {'ui': sys.argv[1], 'fx': sys.argv[2]}
     os.makedirs(OUT, exist_ok=True)
     src = lambda pack, f: os.path.join(packs[pack], f)
+
+    for i in range(1, 4):
+        print(write_mp3(f'radio-{i}', radio_burst(1000 + i), '96k'))
 
     for name, (pack, f, opt) in ONE_SHOTS.items():
         x = normalise(fade(trim(load(src(pack, f)))), opt.get('peak', -1.0))

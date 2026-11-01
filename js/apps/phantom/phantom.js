@@ -22,6 +22,7 @@ import { StatusSimulator, PHASES, rand, hex, clockTime, fmtInt } from './data.js
 import { ScenarioManager, ScenarioContext, transition, SCENARIOS } from './scenarios.js';
 import { CodePane, NetPane, ActivityPane, LogsPane, DataPane, BinaryPane, StatusPane, typeCode } from './panes.js';
 import { AudioController } from './audio.js';
+import { Voice } from './voice.js';
 
 const PREFS_KEY = 'kali-desktop.phantom.v1';
 const DEFAULTS = {
@@ -30,6 +31,8 @@ const DEFAULTS = {
   volume: 70,
   sfx: true,
   ambience: false,
+  voice: true,
+  radio: true,
   muted: false,
   panels: 8,
   theme: 'phantom',
@@ -95,6 +98,8 @@ const COMMANDS = [
   ['hollywood [on|off]', 'multi-panel mode'],
   ['panels [2|4|6|8]', 'number of panels in Hollywood mode'],
   ['sound [on|off]', 'sound effects'],
+  ['voice [on|off]', 'system voice announcer'],
+  ['radio [on|off]', 'random radio chatter'],
   ['scenarios', 'list the available scenarios'],
   ['auto', 'leave demo mode and resume the automatic console'],
 ];
@@ -109,6 +114,7 @@ class PhantomConsole {
     this.clock.blocked = () => win.minimized || win.workspace !== wm.workspace || document.hidden;
     this.status = new StatusSimulator();
     this.audio = new AudioController(this.prefs);
+    this.voice = new Voice(this.prefs);
     this.typing = new HumanTypingEngine(() => this.prefs.typingSpeed);
     this.scheduler = new TypingScheduler(this.typing, this.audio);
     this.manager = new ScenarioManager();
@@ -297,6 +303,8 @@ class PhantomConsole {
         row('Sound volume', range('volume', 0, 100, 1, (v) => `${v}%`)),
         row('Sound effects', toggle('sfx')),
         row('Background ambience', toggle('ambience')),
+        row('System voice', toggle('voice')),
+        row('Radio chatter', toggle('radio')),
         row('Terminal panels', seg('panels', [[2, '2'], [4, '4'], [6, '6'], [8, '8']])),
         row('Theme', seg('theme', [['phantom', 'PHANTOM'], ['ice', 'ICE'], ['amber', 'AMBER']])),
         row('Auto loop', toggle('autoLoop')),
@@ -346,7 +354,10 @@ class PhantomConsole {
     document.addEventListener('fullscreenchange', onFs);
     this.cleanups.push(() => document.removeEventListener('fullscreenchange', onFs));
 
-    const onVis = () => this.audio.duck(document.hidden || this.clock.frozen);
+    const onVis = () => {
+      this.audio.duck(document.hidden || this.clock.frozen);
+      if (document.hidden) this.voice.silence();
+    };
     document.addEventListener('visibilitychange', onVis);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVis));
 
@@ -416,6 +427,13 @@ class PhantomConsole {
         if (value && !this.audio.enabled) this.enableAudio();
         else this.audio.syncAmbience();
         break;
+      case 'voice':
+        if (value && !this.audio.enabled) this.enableAudio();
+        else if (!value) this.voice.silence();
+        break;
+      case 'radio':
+        if (value && !this.audio.enabled) this.enableAudio();
+        break;
       case 'panels':
       case 'hollywood':
         this.applyLayout();
@@ -448,6 +466,7 @@ class PhantomConsole {
       this.prefs.audioEnabled = true;
       this.#savePrefs();
       this.audio.setVolume();
+      this.voice.enable();
       if (!silent) this.audio.sfx('sweep', { level: 0.7 });
     }
     this.updateControls();
@@ -532,6 +551,9 @@ class PhantomConsole {
     });
     this.scnEl.textContent = this.scenario ? this.scenario.name : 'STANDBY';
     if (name === 'REPORT') this.focus('main', 4000);
+    if (name === 'PROCESSING') this.voice.say('processing');
+    else if (name === 'ANALYSIS') this.voice.say('analysis');
+    else if (name === 'REPORT') this.voice.say('complete');
     if (name) this.bus.emit('log', { time: clockTime(true), level: 'INFO', source: 'engine', msg: `phase ${name.toLowerCase()}` });
     this.updateFooter();
   }
@@ -598,6 +620,7 @@ class PhantomConsole {
   setPaused(paused) {
     this.clock.paused = paused;
     this.audio.duck(paused || document.hidden);
+    if (paused) this.voice.silence();
     this.updateControls();
     this.updateFooter();
   }
@@ -633,6 +656,7 @@ class PhantomConsole {
     for (const p of this.aux) guard(p.loop(sl));
     guard(this.statusLoop(sl));
     guard(this.flickerLoop(sl));
+    guard(this.radioLoop(sl));
   }
 
   /* -------------------------------------------- LoopController / engine */
@@ -651,6 +675,7 @@ class PhantomConsole {
       this.scenario = sc;
       this.scnEl.textContent = sc.name;
       this.audio.sfx('sweep', { level: 0.5 });
+      this.voice.say('operation');
       const ctx = new ScenarioContext(this, sc, sl);
       await sc.run(ctx);
       await transition(ctx);
@@ -673,6 +698,22 @@ class PhantomConsole {
       this.status.step();
       this.bus.emit('status');
       this.updateFooter();
+    }
+  }
+
+  /** Fires the radio-chatter squelch at random intervals. */
+  async radioLoop(sl) {
+    await sl.wait(rand(6000, 12000));
+    for (;;) {
+      await sl.wait(rand(14000, 42000));
+      if (this.prefs.radio && this.audio.active && !this.clock.frozen) {
+        this.audio.sfx('radio', { level: 0.55 + Math.random() * 0.4 });
+        this.flashLed('logs');
+        if (Math.random() < 0.4) {
+          await sl.wait(rand(500, 1400));
+          if (this.prefs.radio && this.audio.active) this.audio.sfx('radio', { level: 0.5 });
+        }
+      }
     }
   }
 
@@ -748,6 +789,7 @@ class PhantomConsole {
     const ready = h('div', { class: 'ph-boot-line ph-boot-ready' }, 'SYSTEM READY.');
     this.bootLines.appendChild(ready);
     this.audio.sfx('success', { level: 0.8 });
+    this.voice.say('online', { force: true });
     await sl.wait(800);
     boot.classList.add('done');
     this.stage.classList.remove('ph-booting');
@@ -949,6 +991,18 @@ class PhantomConsole {
           ok(`Sound ${on ? 'on' : 'off'}`);
         }
         break;
+      case 'voice':
+      case 'radio':
+        if (arg && !['on', 'off'].includes(arg)) bad(`usage: ${cmd} [on|off]`);
+        else {
+          const on = arg ? arg === 'on' : !this.prefs[cmd];
+          if (on && !this.audio.enabled) this.enableAudio();
+          this.setPref(cmd, on);
+          ok(`${cmd === 'voice' ? 'System voice' : 'Radio chatter'} ${on ? 'on' : 'off'}`);
+          if (cmd === 'voice' && on) this.voice.say('online', { force: true });
+          if (cmd === 'radio' && on) this.audio.sfx('radio');
+        }
+        break;
       case 'scenarios':
         t.blank();
         SCENARIOS.forEach((s, i) => t.seg([[`  ${String(i + 1).padStart(2)}  `, 'ph-dim'], [s.name, this.scenario === s ? 'st-ok' : 'ph-strong']]));
@@ -973,6 +1027,7 @@ class PhantomConsole {
     clearTimeout(this.focusTimer);
     this.clock.dispose();
     this.audio.dispose();
+    this.voice.dispose();
     this.cleanups.forEach((fn) => fn());
     this.aux.forEach((p) => p.dispose());
     this.main.dispose();

@@ -18,6 +18,7 @@ const EFFECTS = {
   error: { files: ['error'], gain: 0.55, gap: 200 },
   sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.4, gap: 150 },
   boot: { files: ['boot'], gain: 0.6, gap: 500 },
+  radio: { files: ['radio-1', 'radio-2', 'radio-3'], gain: 0.42, gap: 400 },
 };
 
 /** Looping layers. */

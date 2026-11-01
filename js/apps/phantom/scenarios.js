@@ -48,9 +48,12 @@ export class ScenarioContext {
     this.term.seg([[`[${kind}] `, cls], [msg, kind === '!' ? 'st-warn' : '']]);
     if (kind === '!') {
       this.audio.sfx('warning');
+      this.app.voice.say('warning');
       this.log('WARN', 'analysis', msg);
-    } else if (kind === '-') this.audio.sfx('error', { level: 0.7 });
-    else this.audio.sfx('tick', { level: 0.5, pitch: kind === '+' ? 1.3 : 1 });
+    } else if (kind === '-') {
+      this.audio.sfx('error', { level: 0.7 });
+      this.app.voice.say('denied');
+    } else this.audio.sfx('tick', { level: 0.5, pitch: kind === '+' ? 1.3 : 1 });
     await this.wait(rand(70, 220));
   }
 

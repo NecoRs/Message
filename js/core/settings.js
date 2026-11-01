@@ -11,8 +11,8 @@ export const DEFAULTS = Object.freeze({
   fontSize: 13,
   animations: true,
   // Desktop
-  wallpaper: 'kali-default', // wallpaper id or 'solid'
-  wallpaperColor: '#1677e8',
+  wallpaper: 'kali-geometric', // wallpaper id or 'solid'
+  wallpaperColor: '#0d3a8c',
   wallpaperStyle: 'cover', // 'cover' | 'contain' | 'center'
   desktopIcons: true,
   iconSize: 48,
@@ -109,7 +109,8 @@ export const ACCENTS = {
 };
 
 export const WALLPAPERS = [
-  { id: 'kali-default', name: 'Kali Default', file: 'assets/wallpapers/kali-default.jpg', position: '50% 50%', size: 61869 },
+  { id: 'kali-geometric', name: 'Kali Geometric', file: 'assets/wallpapers/kali-geometric.png', position: '50% 50%', size: 101922 },
+  { id: 'kali-blue', name: 'Kali Blue', file: 'assets/wallpapers/kali-blue.jpg', position: '50% 50%', size: 61869 },
   { id: 'kali-dragon', name: 'Kali Dragon', file: 'assets/wallpapers/kali-dragon.svg', position: '62% 50%' },
   { id: 'kali-emblem', name: 'Emblem', file: 'assets/wallpapers/kali-emblem.svg', position: '50% 50%' },
   { id: 'kali-flow', name: 'Flow', file: 'assets/wallpapers/kali-flow.svg', position: '50% 50%' },

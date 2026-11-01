@@ -1,18 +1,42 @@
-// Desktop sound engine. Every effect is synthesised with the Web Audio API
-// (no sample files), routed through a master bus that follows the desktop
-// volume and mute settings. Effects are throttled so rapid events (typing,
-// table rows) never pile up into noise.
+// Desktop sound engine. Plays recorded sound effects (MP3, Kenney's CC0
+// Interface and Sci-Fi packs — see assets/sounds/CREDITS.txt) through a
+// master bus that follows the desktop volume and mute settings. Buffers are
+// decoded once and reused; rapid events are throttled so they never pile up.
 import { settings } from './settings.js';
 
-const MIN_INTERVAL = { type: 26, tick: 40, row: 55, blip: 60 }; // ms between repeats
-const MAX_VOICES = 28;
+const BASE = new URL('../../assets/sounds/', import.meta.url);
+
+/** One-shot effects: variants, base gain and minimum gap between repeats (ms). */
+const EFFECTS = {
+  type: { files: ['type-1', 'type-2', 'type-3', 'type-4', 'type-5'], gain: 0.3, gap: 26 },
+  tick: { files: ['tick'], gain: 0.38, gap: 40 },
+  row: { files: ['row-1', 'row-2'], gain: 0.26, gap: 55 },
+  blip: { files: ['blip'], gain: 0.42, gap: 60 },
+  execute: { files: ['execute'], gain: 0.55, gap: 80 },
+  success: { files: ['success-1', 'success-2'], gain: 0.5, gap: 200 },
+  warning: { files: ['warning'], gain: 0.5, gap: 200 },
+  error: { files: ['error'], gain: 0.45, gap: 200 },
+  sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.42, gap: 150 },
+  boot: { files: ['boot'], gain: 0.55, gap: 500 },
+};
+
+/** Looping layers. */
+const LOOPS = {
+  processing: { file: 'loop-processing', gain: 0.2, fadeIn: 0.6 },
+  ambience: { file: 'loop-ambience', gain: 0.32, fadeIn: 2.5 },
+};
+
+const MAX_VOICES = 24;
+const LOOP_TRIM = 0.025; // skip MP3 encoder padding at the loop edges
 
 class SoundEngine {
   constructor() {
     this.ctx = null;
     this.master = null;
-    this.noise = {};
+    this.buffers = new Map(); // file -> AudioBuffer
+    this.loading = new Map(); // file -> Promise<AudioBuffer|null>
     this.last = {};
+    this.lastVariant = {};
     this.voices = 0;
   }
 
@@ -35,6 +59,7 @@ class SoundEngine {
         /* blocked until a gesture */
       }
     }
+    if (this.ready) this.preload();
     return this.ready;
   }
 
@@ -43,10 +68,10 @@ class SoundEngine {
     const ctx = new AC({ latencyHint: 'interactive' });
     this.ctx = ctx;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -16;
-    comp.knee.value = 12;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.004;
+    comp.threshold.value = -14;
+    comp.knee.value = 10;
+    comp.ratio.value = 3;
+    comp.attack.value = 0.003;
     comp.release.value = 0.2;
     this.master = ctx.createGain();
     this.master.connect(comp);
@@ -54,26 +79,6 @@ class SoundEngine {
     this.#applyVolume(true);
     settings.on('change:volume', () => this.#applyVolume());
     settings.on('change:muted', () => this.#applyVolume());
-
-    // Noise buffers are rendered once and reused by every effect.
-    this.noise.white = this.#noiseBuffer(1.5, 'white');
-    this.noise.brown = this.#noiseBuffer(4, 'brown');
-  }
-
-  #noiseBuffer(seconds, kind) {
-    const ctx = this.ctx;
-    const len = Math.floor(ctx.sampleRate * seconds);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    let last = 0;
-    for (let i = 0; i < len; i++) {
-      const w = Math.random() * 2 - 1;
-      if (kind === 'brown') {
-        last = (last + 0.02 * w) / 1.02;
-        d[i] = last * 3.2;
-      } else d[i] = w;
-    }
-    return buf;
   }
 
   #applyVolume(immediate = false) {
@@ -82,6 +87,43 @@ class SoundEngine {
     const g = this.master.gain;
     if (immediate) g.value = v;
     else g.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
+
+  /* ------------------------------------------------------------ buffers */
+
+  #load(file) {
+    if (this.loading.has(file)) return this.loading.get(file);
+    const p = fetch(new URL(`${file}.mp3`, BASE))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${file}.mp3`);
+        return r.arrayBuffer();
+      })
+      .then((data) => this.ctx.decodeAudioData(data))
+      .then((buf) => {
+        this.buffers.set(file, buf);
+        return buf;
+      })
+      .catch((err) => {
+        console.warn('[sound] could not load', file, err.message || err);
+        return null;
+      });
+    this.loading.set(file, p);
+    return p;
+  }
+
+  /** Fetches and decodes every effect once; later plays reuse the buffers. */
+  preload() {
+    if (!this.ctx) return Promise.resolve();
+    const files = [...Object.values(EFFECTS).flatMap((e) => e.files), ...Object.values(LOOPS).map((l) => l.file)];
+    return Promise.all(files.map((f) => this.#load(f)));
+  }
+
+  #variant(name, files) {
+    if (files.length === 1) return files[0];
+    let i = Math.floor(Math.random() * files.length);
+    if (files[i] === this.lastVariant[name]) i = (i + 1) % files.length;
+    this.lastVariant[name] = files[i];
+    return files[i];
   }
 
   /** A gain node connected to the master bus, for per-app volume. */
@@ -93,287 +135,80 @@ class SoundEngine {
     return g;
   }
 
-  /* ------------------------------------------------------------ helpers */
+  /* ------------------------------------------------------------ effects */
 
-  #env(gainNode, t, attack, peak, decay) {
-    const g = gainNode.gain;
-    g.setValueAtTime(0.0001, t);
-    g.exponentialRampToValueAtTime(peak, t + attack);
-    g.exponentialRampToValueAtTime(0.0001, t + attack + decay);
-  }
-
-  #osc(type, freq, t, dur, dest, peak, attack = 0.004) {
-    const ctx = this.ctx;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    this.#env(g, t, attack, peak, dur);
-    o.connect(g).connect(dest);
-    o.start(t);
-    o.stop(t + attack + dur + 0.02);
-    this.#track(o);
-    return o;
-  }
-
-  #noiseBurst(t, dur, dest, peak, filterType, freq, q = 1) {
+  /**
+   * Plays a one-shot effect: type, tick, row, blip, execute, success,
+   * warning, error, sweep, boot. Returns false if throttled or not loaded.
+   */
+  play(name, { dest, level = 1, pitch = 1 } = {}) {
+    if (!this.ready) return false;
+    const def = EFFECTS[name];
+    if (!def) return false;
+    const now = performance.now();
+    if (now - (this.last[name] || 0) < def.gap) return false;
+    if (this.voices >= MAX_VOICES) return false;
+    const file = this.#variant(name, def.files);
+    const buf = this.buffers.get(file);
+    if (!buf) {
+      this.#load(file);
+      return false;
+    }
+    this.last[name] = now;
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
-    src.buffer = this.noise.white;
-    const f = ctx.createBiquadFilter();
-    f.type = filterType;
-    f.frequency.value = freq;
-    f.Q.value = q;
+    src.buffer = buf;
+    src.playbackRate.value = Math.max(0.8, Math.min(1.3, pitch));
     const g = ctx.createGain();
-    this.#env(g, t, 0.002, peak, dur);
-    src.connect(f).connect(g).connect(dest);
-    const offset = Math.random() * (src.buffer.duration - dur - 0.05);
-    src.start(t, Math.max(0, offset), dur + 0.05);
-    this.#track(src);
-    return { src, filter: f, gain: g };
-  }
-
-  #track(node) {
+    g.gain.value = def.gain * level;
+    src.connect(g).connect(dest || this.master);
     this.voices++;
-    node.onended = () => {
+    src.onended = () => {
       this.voices--;
       try {
-        node.disconnect();
+        src.disconnect();
+        g.disconnect();
       } catch {
         /* already disconnected */
       }
     };
-  }
-
-  /* ------------------------------------------------------------ effects */
-
-  /**
-   * Plays a one-shot effect. Names: type, tick, row, execute, success,
-   * warning, error, sweep, boot, blip. Returns false if throttled.
-   */
-  play(name, { dest, level = 1, pitch = 1 } = {}) {
-    if (!this.ready) return false;
-    const nowMs = performance.now();
-    const gap = MIN_INTERVAL[name];
-    if (gap && nowMs - (this.last[name] || 0) < gap) return false;
-    if (this.voices > MAX_VOICES) return false;
-    this.last[name] = nowMs;
-    const out = dest || this.master;
-    const t = this.ctx.currentTime + 0.005;
-    const v = level;
-    const r = () => 0.85 + Math.random() * 0.3;
-    switch (name) {
-      case 'type': {
-        // light electronic key: filtered tick + faint high blip
-        this.#noiseBurst(t, 0.014, out, 0.05 * v, 'bandpass', 3200 * r() * pitch, 2.5);
-        this.#osc('sine', 1900 * r() * pitch, t, 0.018, out, 0.018 * v, 0.001);
-        break;
-      }
-      case 'tick':
-        this.#osc('sine', 2600 * r() * pitch, t, 0.02, out, 0.03 * v, 0.001);
-        break;
-      case 'row':
-        this.#osc('triangle', 1500 * r() * pitch, t, 0.03, out, 0.035 * v, 0.002);
-        this.#noiseBurst(t, 0.01, out, 0.02 * v, 'highpass', 5000, 0.7);
-        break;
-      case 'blip':
-        this.#osc('sine', 1200 * pitch, t, 0.05, out, 0.05 * v);
-        break;
-      case 'execute': {
-        // "digital execute": quick rising two-tone with a click
-        this.#noiseBurst(t, 0.012, out, 0.07 * v, 'highpass', 2500, 0.8);
-        this.#osc('square', 740 * pitch, t, 0.05, this.#lowpass(out, 2600), 0.05 * v);
-        this.#osc('square', 1110 * pitch, t + 0.055, 0.07, this.#lowpass(out, 3200), 0.05 * v);
-        this.#osc('sine', 2220 * pitch, t + 0.055, 0.09, out, 0.025 * v);
-        break;
-      }
-      case 'success': {
-        const notes = [659.25, 880, 1318.5];
-        notes.forEach((f, i) => {
-          this.#osc('triangle', f * pitch, t + i * 0.075, 0.22, out, 0.055 * v, 0.006);
-          this.#osc('sine', f * 2 * pitch, t + i * 0.075, 0.12, out, 0.015 * v, 0.004);
-        });
-        break;
-      }
-      case 'warning': {
-        const lp = this.#lowpass(out, 1400);
-        this.#osc('square', 329.6 * pitch, t, 0.12, lp, 0.06 * v, 0.004);
-        this.#osc('square', 246.9 * pitch, t + 0.14, 0.18, lp, 0.06 * v, 0.004);
-        break;
-      }
-      case 'error': {
-        const lp = this.#lowpass(out, 900);
-        this.#osc('sawtooth', 140 * pitch, t, 0.09, lp, 0.07 * v);
-        this.#osc('sawtooth', 140 * pitch, t + 0.13, 0.12, lp, 0.07 * v);
-        break;
-      }
-      case 'sweep': {
-        // futuristic sweep: band-passed noise gliding upward with a soft tone
-        const ctx = this.ctx;
-        const dur = 0.55;
-        const n = this.#noiseBurst(t, dur, out, 0.06 * v, 'bandpass', 300, 6);
-        n.filter.frequency.setValueAtTime(260, t);
-        n.filter.frequency.exponentialRampToValueAtTime(5200, t + dur);
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.setValueAtTime(180 * pitch, t);
-        o.frequency.exponentialRampToValueAtTime(880 * pitch, t + dur);
-        this.#env(g, t, 0.08, 0.03 * v, dur - 0.08);
-        o.connect(g).connect(out);
-        o.start(t);
-        o.stop(t + dur + 0.05);
-        this.#track(o);
-        break;
-      }
-      case 'boot': {
-        const ctx = this.ctx;
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.setValueAtTime(60, t);
-        o.frequency.exponentialRampToValueAtTime(420 * pitch, t + 0.7);
-        this.#env(g, t, 0.05, 0.08 * v, 0.75);
-        o.connect(g).connect(out);
-        o.start(t);
-        o.stop(t + 0.85);
-        this.#track(o);
-        this.#noiseBurst(t, 0.3, out, 0.03 * v, 'lowpass', 400, 0.7);
-        break;
-      }
-      default:
-        return false;
-    }
+    src.start(ctx.currentTime + 0.003);
     return true;
   }
 
-  #lowpass(dest, freq) {
-    const f = this.ctx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = freq;
-    f.connect(dest);
-    // disconnect once the voices feeding it are long finished
-    setTimeout(() => {
-      try {
-        f.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }, 1500);
-    return f;
-  }
-
   /**
-   * Starts a looping layer that fades in. Names: 'processing', 'ambience'.
+   * Starts a looping layer ('processing' or 'ambience') that fades in.
    * Returns { stop(fadeSeconds), setLevel(level, seconds) }.
    */
   loop(name, { dest, level = 1 } = {}) {
     if (!this.ready) return null;
+    const def = LOOPS[name];
+    if (!def) return null;
     const ctx = this.ctx;
     const out = ctx.createGain();
     out.gain.value = 0.0001;
     out.connect(dest || this.master);
-    const nodes = [];
-    const start = (n) => {
-      n.start();
-      nodes.push(n);
-      return n;
-    };
-    let peak;
-    let fadeIn;
-
-    if (name === 'processing') {
-      // low digital hum with a slowly moving filter
-      peak = 0.05 * level;
-      fadeIn = 0.5;
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = 420;
-      lp.Q.value = 4;
-      lp.connect(out);
-      for (const [f, type, g] of [[55, 'sawtooth', 0.5], [110.4, 'square', 0.18], [164.8, 'sine', 0.3]]) {
-        const o = ctx.createOscillator();
-        o.type = type;
-        o.frequency.value = f;
-        const og = ctx.createGain();
-        og.gain.value = g;
-        o.connect(og).connect(lp);
-        start(o);
-      }
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 0.45;
-      const depth = ctx.createGain();
-      depth.gain.value = 180;
-      lfo.connect(depth).connect(lp.frequency);
-      start(lfo);
-      const n = ctx.createBufferSource();
-      n.buffer = this.noise.white;
-      n.loop = true;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 1800;
-      bp.Q.value = 8;
-      const ng = ctx.createGain();
-      ng.gain.value = 0.05;
-      n.connect(bp).connect(ng).connect(out);
-      start(n);
-    } else if (name === 'ambience') {
-      // dark, barely-there drone: detuned low sines over filtered brown noise
-      peak = 0.06 * level;
-      fadeIn = 2.5;
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = 320;
-      lp.connect(out);
-      for (const f of [41.2, 41.6, 61.7, 82.4, 123.5]) {
-        const o = ctx.createOscillator();
-        o.type = 'sine';
-        o.frequency.value = f;
-        const og = ctx.createGain();
-        og.gain.value = f > 100 ? 0.12 : 0.35;
-        o.connect(og).connect(lp);
-        start(o);
-      }
-      const n = ctx.createBufferSource();
-      n.buffer = this.noise.brown;
-      n.loop = true;
-      const ng = ctx.createGain();
-      ng.gain.value = 0.5;
-      n.connect(ng).connect(lp);
-      start(n);
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 0.07;
-      const depth = ctx.createGain();
-      depth.gain.value = 0.25;
-      const amp = ctx.createGain();
-      amp.gain.value = 0.75;
-      lfo.connect(depth).connect(amp.gain);
-      lp.disconnect();
-      lp.connect(amp).connect(out);
-      start(lfo);
-      // faint digital shimmer
-      const sh = ctx.createOscillator();
-      sh.type = 'sine';
-      sh.frequency.value = 2093;
-      const shg = ctx.createGain();
-      shg.gain.value = 0.004;
-      const trem = ctx.createOscillator();
-      trem.frequency.value = 0.21;
-      const tremDepth = ctx.createGain();
-      tremDepth.gain.value = 0.004;
-      trem.connect(tremDepth).connect(shg.gain);
-      sh.connect(shg).connect(out);
-      start(sh);
-      start(trem);
-    } else {
-      out.disconnect();
-      return null;
-    }
-
-    const t = ctx.currentTime;
-    out.gain.setValueAtTime(0.0001, t);
-    out.gain.exponentialRampToValueAtTime(peak, t + fadeIn);
+    const peak = Math.max(0.0001, def.gain * level);
+    let src = null;
     let stopped = false;
+
+    const begin = (buf) => {
+      if (stopped || !buf) return;
+      src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.loopStart = LOOP_TRIM;
+      src.loopEnd = Math.max(LOOP_TRIM * 2, buf.duration - LOOP_TRIM);
+      src.connect(out);
+      const t = ctx.currentTime;
+      src.start(t, LOOP_TRIM);
+      out.gain.setValueAtTime(0.0001, t);
+      out.gain.exponentialRampToValueAtTime(peak, t + def.fadeIn);
+    };
+    const buf = this.buffers.get(def.file);
+    if (buf) begin(buf);
+    else this.#load(def.file).then(begin);
+
     return {
       setLevel(l, seconds = 0.6) {
         if (stopped) return;
@@ -387,18 +222,12 @@ class SoundEngine {
         out.gain.setValueAtTime(Math.max(out.gain.value, 0.0001), now);
         out.gain.exponentialRampToValueAtTime(0.0001, now + fade);
         setTimeout(() => {
-          for (const n of nodes) {
-            try {
-              n.stop();
-              n.disconnect();
-            } catch {
-              /* already stopped */
-            }
-          }
           try {
+            src?.stop();
+            src?.disconnect();
             out.disconnect();
           } catch {
-            /* ignore */
+            /* already stopped */
           }
         }, fade * 1000 + 60);
       },

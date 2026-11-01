@@ -122,6 +122,11 @@ const APPS = {
   session: svg(48, '<rect x="5" y="5" width="38" height="38" rx="9" fill="#323a4b"/><circle cx="24" cy="19" r="5.5" fill="#dfe5ef"/><path d="M14 35c1.5-5.5 5.2-8 10-8s8.5 2.5 10 8z" fill="#dfe5ef"/>'),
   reset: svg(48, '<rect x="5" y="5" width="38" height="38" rx="9" fill="#323a4b"/><path d="M33 24a9 9 0 1 1-2.6-6.4M31 12v6h-6" stroke="#dfe5ef" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'),
   desktop: folder('desktop'),
+  phantom: svg(48, '<rect x="4" y="4" width="40" height="40" rx="8" fill="#05080b"/>' +
+    '<rect x="4.75" y="4.75" width="38.5" height="38.5" rx="7.25" fill="none" stroke="#00ff88" stroke-opacity=".5" stroke-width="1.5"/>' +
+    '<path d="M24 11c-7.2 0-12 5-12 11.5V36l3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2V22.5C36 16 31.2 11 24 11z" fill="#00ff88" fill-opacity=".12" stroke="#00ff88" stroke-width="1.6" stroke-linejoin="round"/>' +
+    '<path d="M17.5 22.5h4.5M26 22.5h4.5" stroke="#00c8ff" stroke-width="2.6" stroke-linecap="round"/>' +
+    '<path d="M19.5 29h9" stroke="#00ff88" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>'),
 };
 
 /* ------------------------------------------------------- security tools */

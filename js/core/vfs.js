@@ -116,30 +116,20 @@ if [ -d "$HOME/.local/bin" ] ; then
 fi
 `;
 
-const NOTES = `Engagement notes
-================
+const NOTES = `Notes
+=====
 
-Scope
-- 10.10.14.0/24 (lab network)
-- web01.lab.local, db01.lab.local
-
-Checklist
-[x] Passive recon
-[x] Service discovery
-[ ] Web application review
-[ ] Credential audit
-[ ] Report draft
-
-Reminders
-- Keep screenshots of every finding.
-- Record timestamps for all active testing.
+- Back up ~/Documents every Friday
+- Rotate the lab VM snapshots
+- Try the new wallpaper in Settings › Desktop
+- Read the Xfce keyboard shortcut list
 `;
 
 const TODO = `# To do
 
-- Update wordlists
-- Review firewall rules on the lab router
-- Back up ~/Documents before the next engagement
+- Update the system (sudo apt update && sudo apt full-upgrade)
+- Tidy up ~/Downloads
+- Pick a new terminal font size
 `;
 
 const desktopEntry = (name, exec, iconName, comment) => `[Desktop Entry]
@@ -158,7 +148,7 @@ const BINARIES = [
   'ip', 'kill', 'less', 'ln', 'ls', 'lsb_release', 'man', 'mkdir', 'more', 'mousepad', 'mv', 'nano', 'neofetch', 'ping',
   'ps', 'pwd', 'qterminal', 'readlink', 'realpath', 'rm', 'rmdir', 'sed', 'seq', 'sh', 'sleep', 'sort', 'stat', 'su',
   'sudo', 'tail', 'tee', 'thunar', 'top', 'touch', 'tree', 'true', 'uname', 'uniq', 'uptime', 'vi', 'vim', 'wc',
-  'which', 'whoami', 'xdg-open', 'zsh', 'xfce4-settings-manager',
+  'which', 'whoami', 'xdg-open', 'zsh', 'xfce4-settings-manager', 'phantom-console',
 ];
 
 function buildTree() {
@@ -189,6 +179,7 @@ function buildTree() {
       'qterminal.desktop': F(desktopEntry('Terminal', 'qterminal', 'utilities-terminal', 'Use the command line'), { mode: 0o755 }),
       'firefox-esr.desktop': F(desktopEntry('Firefox ESR', 'firefox-esr', 'firefox-esr', 'Browse the World Wide Web'), { mode: 0o755 }),
       'xfce-settings-manager.desktop': F(desktopEntry('Settings', 'xfce4-settings-manager', 'org.xfce.settings.manager', 'Graphical Settings Manager for Xfce'), { mode: 0o755 }),
+      'phantom-console.desktop': F(desktopEntry('Phantom Console', 'phantom-console', 'phantom-console', 'Cinematic cyber operations simulator'), { mode: 0o755 }),
     }),
     Documents: D({
       'notes.txt': F(NOTES, { mtime: BOOT - 3600000 * 5 }),
@@ -196,7 +187,6 @@ function buildTree() {
     }),
     Downloads: D({
       'kali-linux-2026.3-installer-amd64.iso': F('', { mtime: BOOT - 86400000 * 6, extra: { binary: true, size: 4402315264 } }),
-      'common-passwords.txt': F('123456\npassword\n123456789\nqwerty\n12345678\n111111\n1234567890\nadmin\nletmein\nwelcome\n', { mtime: BOOT - 86400000 * 4 }),
     }),
     Music: D(),
     Pictures: D({ ...pictures, Screenshots: D() }),
@@ -261,10 +251,6 @@ function buildTree() {
       local: D({ bin: D(), share: D() }),
       share: D({
         backgrounds: D({ kali: D(backgrounds) }),
-        wordlists: D({
-          'rockyou.txt.gz': F('', { extra: { binary: true, size: 53357329 } }),
-          'common.txt': F('admin\nbackup\nconfig\ndev\nimages\nlogin\nphpmyadmin\nserver-status\nuploads\nwp-admin\n'),
-        }),
         doc: D(),
       }),
     }),

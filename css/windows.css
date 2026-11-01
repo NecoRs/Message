@@ -1,0 +1,381 @@
+/* Window chrome (Kali-Dark xfwm4-like), snapping preview and dialogs. */
+
+.windows {
+  position: absolute;
+  top: var(--panel-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
+  contain: strict;
+}
+
+.win {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--win-bg);
+  border: 1px solid rgba(0, 0, 0, .55);
+  border-radius: 6px 6px 3px 3px;
+  box-shadow: var(--shadow-win-inactive);
+  pointer-events: auto;
+  outline: none;
+  overflow: visible;
+}
+
+.win::before {
+  /* thin inner highlight like the Kali-Dark frame */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, .05);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.win.active {
+  box-shadow: var(--shadow-win);
+}
+
+.win.minimized,
+.win.other-workspace {
+  display: none;
+}
+
+.win.win-animating {
+  transition: translate .18s var(--ease), width .18s var(--ease), height .18s var(--ease);
+}
+
+.win.dragging,
+.win.resizing {
+  will-change: translate, width, height;
+}
+
+.win.dragging .win-body,
+.win.resizing .win-body {
+  pointer-events: none;
+}
+
+.win.maximized {
+  border-radius: 0;
+  border-width: 0;
+}
+
+.win.maximized::before {
+  border: 0;
+}
+
+.win.tiled {
+  border-radius: 0;
+}
+
+.win-titlebar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 30px;
+  padding: 0 4px 0 6px;
+  background: var(--title-bg);
+  color: var(--title-fg-inactive);
+  border-radius: 6px 6px 0 0;
+  border-bottom: 1px solid rgba(0, 0, 0, .25);
+  touch-action: none;
+}
+
+.win.maximized .win-titlebar {
+  border-radius: 0;
+}
+
+.win.active .win-titlebar {
+  color: var(--title-fg);
+}
+
+.win-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.win-icon:hover {
+  background: var(--hover-strong);
+}
+
+.win:not(.active) .win-icon {
+  opacity: .7;
+}
+
+.win-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: calc(var(--fs) - .5px);
+}
+
+.win-buttons {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  transition: background-color .1s, color .1s;
+}
+
+.win-btn .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.win-btn:hover {
+  background: var(--hover-strong);
+  color: var(--title-fg);
+}
+
+.win-btn.win-close:hover {
+  background: #e0464c;
+  color: #fff;
+}
+
+.win-btn:active {
+  filter: brightness(.9);
+}
+
+.win-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 3px 3px;
+}
+
+.win.maximized .win-body {
+  border-radius: 0;
+}
+
+.win-blocked .win-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+}
+
+/* resize handles */
+.win-resize {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+
+.win-resize-n,
+.win-resize-s {
+  left: 8px;
+  right: 8px;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.win-resize-n {
+  top: -4px;
+}
+
+.win-resize-s {
+  bottom: -4px;
+}
+
+.win-resize-e,
+.win-resize-w {
+  top: 8px;
+  bottom: 8px;
+  width: 7px;
+  cursor: ew-resize;
+}
+
+.win-resize-e {
+  right: -4px;
+}
+
+.win-resize-w {
+  left: -4px;
+}
+
+.win-resize-ne,
+.win-resize-nw,
+.win-resize-se,
+.win-resize-sw {
+  width: 14px;
+  height: 14px;
+}
+
+.win-resize-ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+
+.win-resize-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+
+.win-resize-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+
+.win-resize-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+
+.win.maximized .win-resize,
+.win.tiled .win-resize,
+.is-mobile .win:not(.win-dialog) .win-resize {
+  display: none;
+}
+
+.snap-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9000;
+  border: 1px solid rgba(var(--accent-rgb), .8);
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), .16);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s, translate .12s var(--ease), width .12s var(--ease), height .12s var(--ease);
+}
+
+.snap-preview.show {
+  opacity: 1;
+}
+
+/* mobile: windows fill the space below the panel */
+.is-mobile .win:not(.win-dialog) {
+  border-radius: 0;
+  border-width: 0;
+}
+
+.is-mobile .win-titlebar {
+  height: 40px;
+  border-radius: 0;
+}
+
+.is-mobile .win-btn {
+  width: 34px;
+  height: 34px;
+  padding: 8px;
+}
+
+.is-mobile .win-btn .ico {
+  width: 18px;
+  height: 18px;
+}
+
+.is-mobile .win-btn.win-max {
+  display: none;
+}
+
+.is-mobile .win-dialog {
+  max-width: calc(100vw - 16px);
+}
+
+/* ------------------------------------------------------------- dialogs */
+
+.win-dialog .win-title {
+  font-weight: 400;
+}
+
+.dialog {
+  padding: 16px 16px 12px;
+  gap: 14px;
+}
+
+.dialog-main {
+  display: flex;
+  gap: 14px;
+}
+
+.dialog-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+.dialog-icon-info,
+.dialog-icon-question {
+  color: var(--accent-2);
+  padding: 4px;
+}
+
+.dialog-icon-warning {
+  color: #ffb000;
+  padding: 4px;
+}
+
+.dialog-icon-error {
+  color: #ff5a64;
+  padding: 4px;
+}
+
+.dialog-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.dialog-heading {
+  font-weight: 700;
+  font-size: calc(var(--fs) + 1px);
+}
+
+.dialog-message {
+  color: var(--text-muted);
+  white-space: pre-line;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dialog-entry {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.dialog-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}

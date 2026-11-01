@@ -1143,3 +1143,172 @@
     animation: none !important;
   }
 }
+
+/* =====================================================================
+   HORROR / CLASSIC / MYSTERIOUS redesign
+   Deeper blacks, an always-on vignette that slowly breathes, a rolling
+   scanline, a faint danger edge and a flickering sigil. Kept subtle and
+   reduced-motion aware.
+   ===================================================================== */
+
+.phantom {
+  --ph-bg: #020304;
+  --ph-panel: rgba(4, 7, 9, .96);
+  --ph-fg: #16ff9b;
+  --ph-text: #93e7c4;
+  --ph-line: rgba(0, 255, 136, .13);
+  --ph-vignette: rgba(0, 0, 0, .72);
+  background:
+    radial-gradient(130% 90% at 50% 0%, #061012 0%, #030506 46%, #010203 100%);
+}
+
+/* persistent vignette + scanlines, independent of the CRT toggle */
+.phantom::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background:
+    radial-gradient(118% 108% at 50% 42%, transparent 52%, var(--ph-vignette) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 7%, transparent 93%, rgba(0, 0, 0, .35));
+  mix-blend-mode: multiply;
+  animation: ph-breathe 7s ease-in-out infinite;
+}
+
+/* a lone scanline drifting down the whole app */
+.phantom::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  z-index: 41;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ph-fg) 22%, transparent), transparent);
+  opacity: .5;
+  will-change: top;
+  animation: ph-scan 7.5s linear infinite;
+}
+
+@keyframes ph-breathe {
+  50% { opacity: .72; }
+}
+
+@keyframes ph-scan {
+  0% { top: 0; opacity: 0; }
+  8% { opacity: .45; }
+  92% { opacity: .45; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* a dim red "danger" presence that pulses in from the edges */
+.ph-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  background: radial-gradient(125% 115% at 50% 50%, transparent 60%, rgba(120, 8, 24, .22) 100%);
+  opacity: .55;
+  animation: ph-dread 11s ease-in-out infinite;
+}
+
+@keyframes ph-dread {
+  50% { opacity: .9; }
+}
+
+/* deeper panels, heavier inner shadow — like unlit instrument bays */
+.ph-pane {
+  background:
+    radial-gradient(120% 140% at 50% -10%, rgba(0, 255, 136, .03), transparent 60%),
+    var(--ph-panel);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .6),
+    inset 0 0 44px rgba(0, 0, 0, .55),
+    0 10px 30px rgba(0, 0, 0, .6);
+}
+
+.ph-has-focus .ph-pane:not(.ph-focus) {
+  opacity: .5;
+  filter: brightness(.7) saturate(.85);
+}
+
+/* the brand sigil breathes and glitches faintly */
+.ph-brand-name {
+  animation: ph-sigil 5s ease-in-out infinite;
+}
+
+@keyframes ph-sigil {
+  0%, 100% { text-shadow: 0 0 8px var(--ph-glow); }
+  48% { text-shadow: 0 0 8px var(--ph-glow); }
+  50% { text-shadow: -1px 0 6px rgba(255, 48, 79, .6), 1px 0 6px var(--ph-fg2); }
+  52% { text-shadow: 0 0 8px var(--ph-glow); }
+}
+
+.ph-topbar,
+.ph-footer {
+  background: linear-gradient(180deg, #05090b, #010203);
+}
+
+/* main console gets the faintest green wash, like a phosphor tube */
+.ph-body-main {
+  background: radial-gradient(140% 120% at 50% 0%, rgba(0, 255, 136, .028), transparent 55%);
+}
+
+/* ---- boot: classified header ---- */
+
+.ph-boot {
+  background:
+    radial-gradient(120% 90% at 50% 30%, #06100f 0%, #020304 60%, #000 100%);
+}
+
+.ph-boot-inner {
+  letter-spacing: .02em;
+}
+
+.ph-boot-frame { color: color-mix(in srgb, var(--ph-fg) 55%, var(--ph-dim)); }
+
+.ph-boot-sigil {
+  color: var(--ph-fg);
+  text-shadow: 0 0 12px var(--ph-glow);
+  animation: ph-sigil 4s ease-in-out infinite;
+}
+
+.ph-boot-class {
+  color: var(--ph-fg2);
+  letter-spacing: .12em;
+}
+
+.ph-boot-warn {
+  color: #ff5d54;
+  text-shadow: 0 0 10px rgba(255, 48, 79, .4);
+  animation: ph-soft-pulse 2.2s ease-in-out infinite;
+}
+
+.ph-boot-meta { color: var(--ph-dim2); }
+.ph-boot-gap { min-height: .9em; }
+
+/* stronger, slower CRT when enabled */
+.ph-crt-on .ph-crt {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .28) 0, rgba(0, 0, 0, .28) 1px, transparent 1px, transparent 3px),
+    radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, .62) 100%);
+}
+
+/* darker themes keep the dread tint readable */
+.phantom[data-theme="amber"] { --ph-vignette: rgba(8, 2, 0, .75); }
+.phantom[data-theme="ice"] { --ph-vignette: rgba(0, 4, 8, .72); }
+
+@media (prefers-reduced-motion: reduce) {
+  .phantom::before,
+  .phantom::after,
+  .ph-stage::after,
+  .ph-brand-name,
+  .ph-boot-sigil,
+  .ph-boot-warn {
+    animation: none !important;
+  }
+  .phantom::after { display: none; }
+}

@@ -8,16 +8,16 @@ const BASE = new URL('../../assets/sounds/', import.meta.url);
 
 /** One-shot effects: variants, base gain and minimum gap between repeats (ms). */
 const EFFECTS = {
-  type: { files: ['type-1', 'type-2', 'type-3', 'type-4', 'type-5'], gain: 0.3, gap: 26 },
-  tick: { files: ['tick'], gain: 0.38, gap: 40 },
-  row: { files: ['row-1', 'row-2'], gain: 0.26, gap: 55 },
-  blip: { files: ['blip'], gain: 0.42, gap: 60 },
-  execute: { files: ['execute'], gain: 0.55, gap: 80 },
+  type: { files: ['type-1', 'type-2', 'type-3', 'type-4', 'type-5'], gain: 0.22, gap: 26 },
+  tick: { files: ['tick'], gain: 0.3, gap: 40 },
+  row: { files: ['row-1', 'row-2'], gain: 0.24, gap: 55 },
+  blip: { files: ['blip'], gain: 0.34, gap: 60 },
+  execute: { files: ['execute'], gain: 0.5, gap: 80 },
   success: { files: ['success-1', 'success-2'], gain: 0.5, gap: 200 },
-  warning: { files: ['warning'], gain: 0.5, gap: 200 },
-  error: { files: ['error'], gain: 0.45, gap: 200 },
-  sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.42, gap: 150 },
-  boot: { files: ['boot'], gain: 0.55, gap: 500 },
+  warning: { files: ['warning'], gain: 0.55, gap: 200 },
+  error: { files: ['error'], gain: 0.55, gap: 200 },
+  sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.4, gap: 150 },
+  boot: { files: ['boot'], gain: 0.6, gap: 500 },
 };
 
 /** Looping layers. */

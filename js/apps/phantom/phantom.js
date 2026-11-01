@@ -18,7 +18,7 @@ import { wm } from '../../core/wm.js';
 import { sound } from '../../core/sound.js';
 import { SimClock, Cancelled, HumanTypingEngine, TypingScheduler } from './engine.js';
 import { TerminalRenderer } from './render.js';
-import { StatusSimulator, PHASES, rand, clockTime, fmtInt } from './data.js';
+import { StatusSimulator, PHASES, rand, hex, clockTime, fmtInt } from './data.js';
 import { ScenarioManager, ScenarioContext, transition, SCENARIOS } from './scenarios.js';
 import { CodePane, NetPane, ActivityPane, LogsPane, DataPane, BinaryPane, StatusPane, typeCode } from './panes.js';
 import { AudioController } from './audio.js';
@@ -693,6 +693,23 @@ class PhantomConsole {
     this.stage.classList.add('ph-booting');
     await sl.wait(1000);
     this.audio.sfx('boot');
+    // Ominous "classified" header (clearly a local simulation).
+    const header = [
+      ['╔══════════════════════════════════════════════╗', 'ph-boot-frame'],
+      ['║   P H A N T O M   C O N S O L E   ·  v3.7.2    ║', 'ph-boot-sigil'],
+      ['║   CLASSIFIED // CYBER OPERATIONS SIMULATOR     ║', 'ph-boot-class'],
+      ['╚══════════════════════════════════════════════╝', 'ph-boot-frame'],
+      [`  NODE 0x${hex(4)}   OPERATOR root   CLEARANCE OMEGA-9`, 'ph-boot-meta'],
+      ['  ▓▒░ RESTRICTED ENVIRONMENT — AUTHORIZED USE ONLY ░▒▓', 'ph-boot-warn'],
+      ['  » local simulation · no live systems · no network «', 'ph-boot-meta'],
+    ];
+    for (const [text, cls] of header) {
+      this.bootLines.appendChild(h('div', { class: `ph-boot-line ${cls}` }, text));
+      this.audio.sfx('tick', { level: 0.5, pitch: 0.7 });
+      await sl.wait(rand(120, 260));
+    }
+    this.bootLines.appendChild(h('div', { class: 'ph-boot-line ph-boot-gap' }, ' '));
+    await sl.wait(500);
     const steps = [
       ['INITIALIZING PHANTOM CONSOLE…', 650],
       ['LOADING SYSTEM MODULES…', 900, true],

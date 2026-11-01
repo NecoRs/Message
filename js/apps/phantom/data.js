@@ -371,6 +371,109 @@ LIMIT 8;`,
   "simulation": { "mode": "offline", "live_targets": 0 }
 }`,
   },
+  {
+    id: 'pcap_tally',
+    lang: 'javascript',
+    file: 'pcap_tally.js',
+    tags: ['network', 'telemetry'],
+    code: `'use strict';
+// Summarise a captured-packet SAMPLE (offline file, no live capture).
+const fs = require('fs');
+
+const PROTO = { 6: 'tcp', 17: 'udp', 1: 'icmp' };
+
+function parseRecord(line) {
+  const [ts, src, dst, proto, bytes] = line.split(',');
+  return { ts: Number(ts), src, dst, proto: PROTO[proto] ?? 'other', bytes: Number(bytes) };
+}
+
+function tally(records) {
+  const byProto = new Map();
+  for (const r of records) {
+    const e = byProto.get(r.proto) ?? { packets: 0, bytes: 0 };
+    e.packets += 1;
+    e.bytes += r.bytes;
+    byProto.set(r.proto, e);
+  }
+  return [...byProto].sort((a, b) => b[1].bytes - a[1].bytes);
+}
+
+const rows = fs.readFileSync('./captures/sample.csv', 'utf8').trim().split('\\n');
+for (const [proto, { packets, bytes }] of tally(rows.map(parseRecord))) {
+  console.log(\`\${proto.padEnd(6)} \${packets} pkts  \${(bytes / 1024).toFixed(1)} KiB\`);
+}`,
+  },
+  {
+    id: 'token_decode',
+    lang: 'python',
+    file: 'token_decode.py',
+    tags: ['logs', 'diag'],
+    code: `#!/usr/bin/env python3
+"""Decode (not verify) a base64url session token's claims for inspection."""
+import base64
+import json
+import sys
+
+
+def b64url(segment: str) -> bytes:
+    pad = "=" * (-len(segment) % 4)
+    return base64.urlsafe_b64decode(segment + pad)
+
+
+def inspect(token: str) -> None:
+    header, payload, _signature = token.split(".")
+    meta = json.loads(b64url(header))
+    claims = json.loads(b64url(payload))
+    print(f"alg={meta.get('alg')}  typ={meta.get('typ')}")
+    for key in ("sub", "role", "iat", "exp"):
+        if key in claims:
+            print(f"  {key:<6} {claims[key]}")
+
+
+if __name__ == "__main__":
+    # sample token from ./fixtures, decoded locally for the demo
+    inspect(sys.argv[1] if len(sys.argv) > 1 else open("fixtures/sample.jwt").read().strip())`,
+  },
+  {
+    id: 'beacon_detect',
+    lang: 'python',
+    file: 'beacon_detect.py',
+    tags: ['network', 'logs'],
+    code: `#!/usr/bin/env python3
+"""Flag suspiciously regular connections in a local sample log (threat hunt)."""
+import statistics
+from collections import defaultdict
+from pathlib import Path
+
+SAMPLE = Path("datasets/connections.csv")
+
+
+def intervals(timestamps: list[float]) -> list[float]:
+    ordered = sorted(timestamps)
+    return [b - a for a, b in zip(ordered, ordered[1:])]
+
+
+def score(host_times: dict[str, list[float]]) -> None:
+    for host, times in host_times.items():
+        gaps = intervals(times)
+        if len(gaps) < 4:
+            continue
+        jitter = statistics.pstdev(gaps) / max(statistics.mean(gaps), 1e-6)
+        verdict = "REGULAR" if jitter < 0.08 else "noisy"
+        print(f"{host:<16} beats={len(gaps):>3} jitter={jitter:5.2f} [{verdict}]")
+
+
+def main() -> None:
+    host_times: dict[str, list[float]] = defaultdict(list)
+    for line in SAMPLE.read_text().splitlines():
+        ts, host = line.split(",")[:2]
+        host_times[host].append(float(ts))
+    score(host_times)
+
+
+if __name__ == "__main__":
+    main()`,
+  },
 ];
 
 export const snippetsFor = (tag) => SNIPPETS.filter((s) => s.tags.includes(tag));

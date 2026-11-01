@@ -23,33 +23,35 @@ import numpy as np
 RATE = 44100
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'sounds')
 
+# A harsher, digital "ops-room" set: glitch keystrokes, laser-zap execute,
+# metallic alarms, deep-impact errors, electric sweeps and an ominous swell.
 # output name -> (pack, file, options)
 ONE_SHOTS = {
-    'type-1': ('ui', 'click_002.wav', {}),
-    'type-2': ('ui', 'click_003.wav', {}),
-    'type-3': ('ui', 'click_004.wav', {}),
-    'type-4': ('ui', 'click_005.wav', {}),
-    'type-5': ('ui', 'tick_002.wav', {}),
-    'tick': ('ui', 'tick_001.wav', {}),
-    'row-1': ('ui', 'select_001.wav', {}),
-    'row-2': ('ui', 'select_002.wav', {}),
-    'blip': ('ui', 'pluck_001.wav', {}),
+    'type-1': ('ui', 'glitch_001.wav', {'peak': -5.0}),
+    'type-2': ('ui', 'glitch_002.wav', {'peak': -5.0}),
+    'type-3': ('ui', 'glitch_004.wav', {'peak': -5.0}),
+    'type-4': ('ui', 'glitch_003.wav', {'peak': -5.0}),
+    'type-5': ('ui', 'tick_002.wav', {'peak': -5.0}),
+    'tick': ('ui', 'glitch_003.wav', {'peak': -4.0}),
+    'row-1': ('ui', 'glitch_004.wav', {'peak': -4.0}),
+    'row-2': ('ui', 'drop_002.wav', {'peak': -5.0}),
+    'blip': ('ui', 'glitch_002.wav', {'peak': -3.0}),
     'success-1': ('ui', 'confirmation_002.wav', {}),
     'success-2': ('ui', 'confirmation_003.wav', {}),
-    'warning': ('ui', 'question_002.wav', {}),
-    'error': ('ui', 'error_006.wav', {}),
-    'sweep-1': ('ui', 'maximize_004.wav', {}),
-    'sweep-2': ('ui', 'maximize_006.wav', {}),
+    'warning': ('fx', 'impact_metal_004.ogg', {'lowpass': 2600, 'peak': -3.0}),
+    'error': ('fx', 'impact_metal_002.ogg', {'lowpass': 2200, 'peak': -2.0}),
+    'sweep-1': ('fx', 'force_field_000.ogg', {'peak': -3.0}),
+    'sweep-2': ('fx', 'force_field_002.ogg', {'peak': -3.0}),
     'sweep-3': ('fx', 'door_open_000.ogg', {}),
-    'boot': ('fx', 'force_field_000.ogg', {'peak': -3.0}),
+    'boot': ('fx', 'low_frequency_explosion_001.ogg', {'peak': -2.0}),
 }
-# "digital execute": a short glitch with a select blip 25 ms later
+# "digital execute": a retro laser zap with a glitch transient in front
 LAYERED = {
-    'execute': [('ui', 'glitch_001.wav', 0.0, 1.0), ('ui', 'select_002.wav', 0.025, 0.8)],
+    'execute': [('ui', 'glitch_002.wav', 0.0, 0.8), ('fx', 'laser_retro_000.ogg', 0.015, 0.9)],
 }
 LOOPS = {
-    'loop-processing': ('fx', 'computer_noise_000.ogg', {'lowpass': 7000, 'peak': -4.0}),
-    'loop-ambience': ('fx', 'space_engine_low_001.ogg', {'lowpass': 900, 'peak': -3.0}),
+    'loop-processing': ('fx', 'computer_noise_002.ogg', {'lowpass': 7000, 'peak': -4.0}),
+    'loop-ambience': ('fx', 'space_engine_low_001.ogg', {'lowpass': 760, 'peak': -4.0}),
 }
 
 

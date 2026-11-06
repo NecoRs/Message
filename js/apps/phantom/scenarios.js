@@ -176,7 +176,7 @@ export class ScenarioContext {
 
 const INTERLUDES = [
   async (c) => {
-    await c.type('phantom status --brief');
+    await c.type('msfstatus --brief');
     const s = c.app.status;
     await c.status('*', `scenarios run: ${c.app.manager.count}   uptime ${s.uptime}   cpu ${Math.round(s.cpu)}%   queue ${s.queue}`);
   },
@@ -186,7 +186,7 @@ const INTERLUDES = [
     await c.out(` ${clockTime()} up ${s.uptime.slice(0, 5)},  1 user,  load average: ${(s.cpu / 100).toFixed(2)}, ${(s.cpu / 120).toFixed(2)}, ${(s.cpu / 150).toFixed(2)}`);
   },
   async (c) => {
-    await c.type('phantom cache flush --expired');
+    await c.type('msfcache flush --expired');
     await c.spinner('Scanning cache segments', rand(500, 1100));
     await c.status('+', `${int(40, 900)} expired entries removed`);
   },
@@ -226,7 +226,7 @@ const LOG_INTEL = {
     await moduleBoot(c, 'analysis/log_intel', '2.4.1', ['Mounting dataset store ./datasets (read-only)']);
     await c.phase('INITIALIZATION');
     const events = int(18000, 64000);
-    await c.type(`phantom ingest --source ./datasets/auth_events.jsonl --window ${pick(['6h', '12h', '24h'])}`);
+    await c.type(`msfingest --source ./datasets/auth_events.jsonl --window ${pick(['6h', '12h', '24h'])}`);
     await c.spinner('Reading dataset', rand(900, 1800));
     await c.status('+', `${fmtInt(events)} events loaded from the local sample`);
     await interlude(c, 0.3);
@@ -247,7 +247,7 @@ const LOG_INTEL = {
     await c.within(code.done,9000);
 
     await c.phase('ANALYSIS');
-    await c.type(`phantom analyze --anomalies --threshold ${pick(['3.0', '3.5', '4.0'])}`);
+    await c.type(`msfanalyze --anomalies --threshold ${pick(['3.0', '3.5', '4.0'])}`);
     const sources = shuffle(['sso-sim', 'vpn-sim', 'web-sim', 'sshd-sim', 'mail-sim', 'api-sim']).slice(0, int(4, 5));
     const rows = sources.map((s) => {
       const baseline = int(40, 400);
@@ -275,7 +275,7 @@ const LOG_INTEL = {
     } else await c.status('+', 'No sources above the threshold');
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  log-intel-${c.session}`, [
       ['events processed', fmtInt(events)],
       ['sources scored', String(rows.length)],
@@ -293,7 +293,7 @@ const TELEMETRY = {
   async run(c) {
     await moduleBoot(c, 'telemetry/sync_agent', '1.9.0', ['Streams: telemetry, events, metrics (simulated)']);
     await c.phase('INITIALIZATION');
-    await c.type(`phantom sync --streams all --mode passive --interval ${pick(['250ms', '500ms', '1s'])}`);
+    await c.type(`msfsync --streams all --mode passive --interval ${pick(['250ms', '500ms', '1s'])}`);
     c.focus('net', 5000);
     const nodes = shuffle(DOC_NODES).slice(0, int(4, 6));
     const t = await c.table({
@@ -322,7 +322,7 @@ const TELEMETRY = {
     await c.within(code.done,8000);
 
     await c.phase('ANALYSIS');
-    await c.type('phantom verify --checksums --last 6');
+    await c.type('msfverify --checksums --last 6');
     c.focus('bin', 4000);
     let retried = 0;
     for (let i = 0; i < 6; i++) {
@@ -336,7 +336,7 @@ const TELEMETRY = {
     else await c.status('+', 'All nodes within latency targets');
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  telemetry-${c.session}`, [
       ['frames aggregated', fmtInt(frames)],
       ['nodes synced', `${nodes.length - (degraded ? 1 : 0)} / ${nodes.length}`],
@@ -361,7 +361,7 @@ const INVENTORY = {
     await moduleBoot(c, 'inventory/cmdb_reader', '0.9.4', ['Source: local CMDB snapshot — no network access']);
     await c.phase('INITIALIZATION');
     const a = pick(ASSETS);
-    await c.type(`phantom inventory show --asset ${a.asset} --source ./cmdb/assets.db`);
+    await c.type(`msfinventory show --asset ${a.asset} --source ./cmdb/assets.db`);
     await c.spinner('Reading asset record', rand(600, 1200));
     await c.out([['Service inventory for ', ''], [a.asset, 'ph-strong'], [` (${a.ip})`, 'ph-info'], ['  · snapshot ', 'ph-dim'], [new Date().toISOString().slice(0, 10), 'ph-dim']]);
     await c.table({
@@ -375,7 +375,7 @@ const INVENTORY = {
     await c.phase('PROCESSING');
     c.focus('code');
     const code = await c.code(SNIPPETS.find((s) => s.id === 'baseline'));
-    await c.type('phantom baseline compare --profile hardened-v3');
+    await c.type('msfbaseline compare --profile hardened-v3');
     await c.progress('Comparing against baseline', rand(2800, 5200), { total: int(40, 90), unit: 'checks' });
     await c.within(code.done,7000);
 
@@ -405,7 +405,7 @@ const INVENTORY = {
     await c.status('!', `${findings} finding: update available (${a.outdated})`);
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  inventory-${c.session}`, [
       ['asset', `${a.asset} (${a.ip})`],
       ['checks passed', `${checks.length - findings} / ${checks.length}`],
@@ -424,7 +424,7 @@ const INTEGRITY = {
     await moduleBoot(c, 'integrity/manifest', '3.0.2');
     await c.phase('INITIALIZATION');
     const entries = int(96, 220);
-    await c.type('phantom integrity scan --path /opt/lab/app --algo sha256');
+    await c.type('msfintegrity scan --path /opt/lab/app --algo sha256');
     await c.spinner(`Loading manifest (${entries} entries)`, rand(700, 1400));
     await interlude(c, 0.25);
 
@@ -455,7 +455,7 @@ const INTEGRITY = {
     c.app.bus.emit('anomaly', (modified >= 0 ? 1 : 0) + (missing >= 0 ? 1 : 0));
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  integrity-${c.session}`, [
       ['files hashed', String(entries)],
       ['modified', modified >= 0 ? '1' : '0', modified >= 0 ? 'st-warn' : 'st-ok'],
@@ -473,7 +473,7 @@ const DIAG = {
   async run(c) {
     await moduleBoot(c, 'diag/process_sampler', '1.4.0');
     await c.phase('INITIALIZATION');
-    await c.type('phantom diag processes --top 6 --live');
+    await c.type('msfdiag processes --top 6 --live');
     c.focus('act', 5000);
     const procs = processTable(6).map((p) => ({ ...p, memv: p.mem }));
     const t = await c.table({
@@ -505,14 +505,14 @@ const DIAG = {
     const over = p.memv > 70;
     if (over) await c.status('!', `${p.name} (pid ${p.pid}) memory at ${p.memv.toFixed(0)}% — above the 70% soft limit`);
     else await c.status('+', 'All processes inside their resource limits');
-    await c.type('phantom diag recommend');
+    await c.type('msfdiag recommend');
     const recs = over
       ? [`restart ${p.name} during the next maintenance window`, `raise ${p.name} memory limit to ${pick(['512M', '768M', '1G'])}`, 'enable heap snapshots for the next run']
       : ['no action required', 'keep the current sampling interval'];
     for (const r of recs) await c.out([['    → ', 'ph-info'], [r, '']]);
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  diag-${c.session}`, [
       ['processes sampled', String(procs.length)],
       ['peak cpu', `${Math.max(...procs.map((x) => x.cpu)).toFixed(1)}%`],
@@ -531,7 +531,7 @@ const QUERY = {
     await c.phase('BOOT');
     c.term.blank();
     await c.out([['─── ', 'ph-dim'], [c.scenario.name, 'ph-title'], [`  session 0x${c.session}`, 'ph-dim']]);
-    await c.type('phantom modules list');
+    await c.type('msfmodules list');
     const mods = [
       ['analysis/log_intel', '2.4.1'], ['telemetry/sync_agent', '1.9.0'], ['inventory/cmdb_reader', '0.9.4'],
       ['integrity/manifest', '3.0.2'], ['diag/process_sampler', '1.4.0'], ['query/sql_engine', '5.2.0'], ['report/summary', '1.2.7'],
@@ -546,7 +546,7 @@ const QUERY = {
     });
 
     await c.phase('INITIALIZATION');
-    await c.type('phantom db open ./datasets/events.sqlite --readonly');
+    await c.type('msfdb open ./datasets/events.sqlite --readonly');
     const rows = int(120000, 900000);
     await c.status('+', `events.sqlite opened read-only · ${fmtInt(rows)} rows · 4 tables`);
     await interlude(c, 0.3);
@@ -604,7 +604,7 @@ const QUERY = {
     await c.status('*', `${res.length} rows returned in ${rand(0.2, 1.4).toFixed(2)}s`);
 
     await c.phase('REPORT');
-    await c.type('phantom report --format summary');
+    await c.type('msfreport --format summary');
     await c.box(`REPORT  query-${c.session}`, [
       ['rows scanned', fmtInt(rows)],
       ['events summarised', fmtInt(total)],

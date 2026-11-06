@@ -142,13 +142,19 @@ Icon=${iconName}
 Terminal=false
 `;
 
+const MSF_LAUNCHER = desktopEntry('Metasploit Framework', 'msfconsole', 'metasploit-framework', 'Penetration-testing framework — offline simulator');
+const CLASSIC_LAUNCHER = desktopEntry('Metasploit Classic', 'msfconsole-classic', 'metasploit-classic', 'The old-school black & white console — offline simulator');
+
+// Bump when a saved home directory needs updating (see VFS#migrate).
+const HOME_VERSION = 2;
+
 const BINARIES = [
   'apt', 'apt-get', 'bash', 'basename', 'cat', 'chmod', 'chown', 'clear', 'cp', 'date', 'df', 'dirname', 'dpkg', 'du',
   'echo', 'env', 'false', 'file', 'find', 'firefox-esr', 'free', 'grep', 'groups', 'head', 'history', 'hostname', 'id',
   'ip', 'kill', 'less', 'ln', 'ls', 'lsb_release', 'man', 'mkdir', 'more', 'mousepad', 'mv', 'nano', 'neofetch', 'ping',
   'ps', 'pwd', 'qterminal', 'readlink', 'realpath', 'rm', 'rmdir', 'sed', 'seq', 'sh', 'sleep', 'sort', 'stat', 'su',
   'sudo', 'tail', 'tee', 'thunar', 'top', 'touch', 'tree', 'true', 'uname', 'uniq', 'uptime', 'vi', 'vim', 'wc',
-  'which', 'whoami', 'xdg-open', 'zsh', 'xfce4-settings-manager', 'phantom-console',
+  'which', 'whoami', 'xdg-open', 'zsh', 'xfce4-settings-manager', 'msfconsole', 'msfvenom',
 ];
 
 function buildTree() {
@@ -179,7 +185,8 @@ function buildTree() {
       'qterminal.desktop': F(desktopEntry('Terminal', 'qterminal', 'utilities-terminal', 'Use the command line'), { mode: 0o755 }),
       'firefox-esr.desktop': F(desktopEntry('Firefox ESR', 'firefox-esr', 'firefox-esr', 'Browse the World Wide Web'), { mode: 0o755 }),
       'xfce-settings-manager.desktop': F(desktopEntry('Settings', 'xfce4-settings-manager', 'org.xfce.settings.manager', 'Graphical Settings Manager for Xfce'), { mode: 0o755 }),
-      'phantom-console.desktop': F(desktopEntry('Phantom Console', 'phantom-console', 'phantom-console', 'Cinematic cyber operations simulator'), { mode: 0o755 }),
+      'phantom-console.desktop': F(MSF_LAUNCHER, { mode: 0o755 }),
+      'metasploit-classic.desktop': F(CLASSIC_LAUNCHER, { mode: 0o755 }),
     }),
     Documents: D({
       'notes.txt': F(NOTES, { mtime: BOOT - 3600000 * 5 }),
@@ -194,6 +201,7 @@ function buildTree() {
     Templates: D(),
     Videos: D(),
   }, { mode: 0o755 }));
+  home.version = HOME_VERSION;
 
   return D({
     bin: L('usr/bin'),
@@ -667,8 +675,27 @@ class VFS extends Emitter {
   #load() {
     const stored = storageGet(STORE_KEY, null);
     if (stored && stored.type === 'dir' && stored.children) {
+      const changed = this.#migrate(stored);
       this.root.children.home.children.kali = stored;
+      if (changed) storageSet(STORE_KEY, stored);
     }
+  }
+
+  /** Brings a home directory saved by an older version up to date. */
+  #migrate(home) {
+    const from = home.version || 1;
+    if (from >= HOME_VERSION) return false;
+    const desk = home.children.Desktop;
+    if (from < 2 && desk?.type === 'dir') {
+      // "Phantom Console" became "Metasploit Framework"; add Metasploit Classic.
+      const old = desk.children['phantom-console.desktop'];
+      if (old?.type === 'file' && /Name=Phantom Console/.test(old.content || '')) old.content = MSF_LAUNCHER;
+      if (!desk.children['metasploit-classic.desktop']) {
+        desk.children['metasploit-classic.desktop'] = F(CLASSIC_LAUNCHER, { mtime: now(), mode: 0o755, owner: 'kali' });
+      }
+    }
+    home.version = HOME_VERSION;
+    return true;
   }
 
   /** Restores the default home directory (used by Settings › Reset). */

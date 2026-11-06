@@ -36,7 +36,7 @@ export function initDesktop(root) {
       entries = [];
     }
     entries.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
-    const order = ['qterminal.desktop', 'firefox-esr.desktop', 'xfce-settings-manager.desktop', 'phantom-console.desktop'];
+    const order = ['qterminal.desktop', 'firefox-esr.desktop', 'xfce-settings-manager.desktop', 'phantom-console.desktop', 'metasploit-classic.desktop'];
     entries.sort((a, b) => {
       const ia = order.indexOf(a.name);
       const ib = order.indexOf(b.name);

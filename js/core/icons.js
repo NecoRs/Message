@@ -122,6 +122,15 @@ const APPS = {
   session: svg(48, '<rect x="5" y="5" width="38" height="38" rx="9" fill="#323a4b"/><circle cx="24" cy="19" r="5.5" fill="#dfe5ef"/><path d="M14 35c1.5-5.5 5.2-8 10-8s8.5 2.5 10 8z" fill="#dfe5ef"/>'),
   reset: svg(48, '<rect x="5" y="5" width="38" height="38" rx="9" fill="#323a4b"/><path d="M33 24a9 9 0 1 1-2.6-6.4M31 12v6h-6" stroke="#dfe5ef" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'),
   desktop: folder('desktop'),
+  // Metasploit Classic: an old monochrome CRT terminal, black & white
+  classic: svg(48, '<path d="M9 7h30a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V10a3 3 0 0 1 3-3z" fill="#d9d9d4"/>' +
+    '<path d="M9 7h30a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V10a3 3 0 0 1 3-3z" fill="none" stroke="#8c8c86" stroke-width="1"/>' +
+    '<rect x="10" y="10.5" width="28" height="19.5" rx="4" fill="#0b0b0b"/>' +
+    '<g stroke="#fff" stroke-opacity=".08">' + [13, 15.5, 18, 20.5, 23, 25.5, 28].map((y) => `<path d="M11 ${y}h26"/>`).join('') + '</g>' +
+    '<path d="M14 16l4 3.2-4 3.2" stroke="#f4f4f4" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M21 23.5h7" stroke="#f4f4f4" stroke-width="2" stroke-linecap="round"/>' +
+    '<circle cx="36" cy="32.6" r=".9" fill="#5a5a55"/>' +
+    '<path d="M17 35h14l2 5H15z" fill="#bfbfb9"/><rect x="12" y="40" width="24" height="2.6" rx="1" fill="#a9a9a3"/>'),
   phantom: svg(48, '<rect x="4" y="4" width="40" height="40" rx="8" fill="#05080b"/>' +
     '<rect x="4.75" y="4.75" width="38.5" height="38.5" rx="7.25" fill="none" stroke="#00ff88" stroke-opacity=".5" stroke-width="1.5"/>' +
     '<path d="M24 11c-7.2 0-12 5-12 11.5V36l3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2V22.5C36 16 31.2 11 24 11z" fill="#00ff88" fill-opacity=".12" stroke="#00ff88" stroke-width="1.6" stroke-linejoin="round"/>' +

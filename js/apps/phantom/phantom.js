@@ -1,4 +1,5 @@
-// PHANTOM CONSOLE — cinematic cyber operations simulator.
+// METASPLOIT FRAMEWORK — cinematic cyber operations console (offline simulator).
+// (Internally still the "phantom" app: ids, CSS classes and prefs keep that name.)
 //
 // Components:
 //   SimClock / HumanTypingEngine / TypingScheduler  (engine.js)
@@ -79,12 +80,12 @@ const IC = {
 };
 
 const BANNER = [
-  ' ██████╗ ██╗  ██╗ █████╗ ███╗   ██╗████████╗ ██████╗ ███╗   ███╗',
-  ' ██╔══██╗██║  ██║██╔══██╗████╗  ██║╚══██╔══╝██╔═══██╗████╗ ████║',
-  ' ██████╔╝███████║███████║██╔██╗ ██║   ██║   ██║   ██║██╔████╔██║',
-  ' ██╔═══╝ ██╔══██║██╔══██║██║╚██╗██║   ██║   ██║   ██║██║╚██╔╝██║',
-  ' ██║     ██║  ██║██║  ██║██║ ╚████║   ██║   ╚██████╔╝██║ ╚═╝ ██║',
-  ' ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝',
+  ' ███╗   ███╗███████╗███████╗   ███████╗██████╗  █████╗ ███╗   ███╗███████╗',
+  ' ████╗ ████║██╔════╝██╔════╝   ██╔════╝██╔══██╗██╔══██╗████╗ ████║██╔════╝',
+  ' ██╔████╔██║███████╗█████╗     █████╗  ██████╔╝███████║██╔████╔██║█████╗  ',
+  ' ██║╚██╔╝██║╚════██║██╔══╝     ██╔══╝  ██╔══██╗██╔══██║██║╚██╔╝██║██╔══╝  ',
+  ' ██║ ╚═╝ ██║███████║██║        ██║     ██║  ██║██║  ██║██║ ╚═╝ ██║███████╗',
+  ' ╚═╝     ╚═╝╚══════╝╚═╝        ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝',
 ];
 
 const COMMANDS = [
@@ -165,7 +166,7 @@ class PhantomConsole {
     const top = h('div', { class: 'ph-topbar' },
       h('div', { class: 'ph-brand' },
         h('span', { class: 'ph-logo', html: icon('phantom') }),
-        h('div', { class: 'ph-brand-text' }, h('div', { class: 'ph-brand-name' }, 'PHANTOM CONSOLE'), h('div', { class: 'ph-brand-sub' }, 'ADVANCED CYBER OPERATIONS SIMULATOR'))),
+        h('div', { class: 'ph-brand-text' }, h('div', { class: 'ph-brand-name' }, 'METASPLOIT'), h('div', { class: 'ph-brand-sub' }, 'FRAMEWORK CONSOLE · OFFLINE SIMULATOR'))),
       h('div', { class: 'ph-phase' }, this.scnEl, h('div', { class: 'ph-phases' }, this.phaseEls)),
       h('div', { class: 'ph-controls' }, this.audioBtn, this.playBtn, this.restartBtn, this.hollyBtn, this.modeBtn, this.soundBtn, this.settingsBtn, this.fsBtn));
 
@@ -210,7 +211,7 @@ class PhantomConsole {
     this.metaEls.logs.textContent = 'tail -f';
     this.metaEls.stat.textContent = 'live';
     this.metaEls.bin.textContent = 'hex/crc32';
-    this.metaEls.main.textContent = 'root@phantom';
+    this.metaEls.main.textContent = 'root@msf';
 
     // boot overlay
     this.bootLines = h('div', { class: 'ph-boot-lines' });
@@ -238,7 +239,7 @@ class PhantomConsole {
   }
 
   #prompt(el) {
-    el.append(h('span', { class: 'ph-p-user' }, 'root@phantom'), h('span', { class: 'ph-p-sep' }, ':'), h('span', { class: 'ph-p-path' }, '~'), h('span', { class: 'ph-p-hash' }, '# '));
+    el.append(h('span', { class: 'ph-p-user' }, 'root@msf'), h('span', { class: 'ph-p-sep' }, ':'), h('span', { class: 'ph-p-path' }, '~'), h('span', { class: 'ph-p-hash' }, '# '));
     return el;
   }
 
@@ -295,7 +296,7 @@ class PhantomConsole {
     };
     this.settingRenderers = [];
     const closeBtn = h('button', { class: 'ph-ctl', type: 'button', 'aria-label': 'Close settings', html: IC.close, onclick: () => this.toggleSettings(false) });
-    const panel = h('aside', { class: 'ph-settings', hidden: true, 'aria-label': 'Phantom Console settings' },
+    const panel = h('aside', { class: 'ph-settings', hidden: true, 'aria-label': 'Metasploit settings' },
       h('div', { class: 'ph-set-head' }, h('span', null, 'SETTINGS'), closeBtn),
       h('div', { class: 'ph-set-body' },
         row('Typing speed', seg('typingSpeed', [['slow', 'SLOW'], ['normal', 'NORMAL'], ['fast', 'FAST'], ['extreme', 'EXTREME']])),
@@ -306,7 +307,7 @@ class PhantomConsole {
         row('System voice', toggle('voice')),
         row('Radio chatter', toggle('radio')),
         row('Terminal panels', seg('panels', [[2, '2'], [4, '4'], [6, '6'], [8, '8']])),
-        row('Theme', seg('theme', [['phantom', 'PHANTOM'], ['ice', 'ICE'], ['amber', 'AMBER']])),
+        row('Theme', seg('theme', [['phantom', 'MSF'], ['ice', 'ICE'], ['amber', 'AMBER']])),
         row('Auto loop', toggle('autoLoop')),
         row('CRT effects', toggle('crt')),
         row('Auto focus', toggle('autoFocus')),
@@ -466,8 +467,10 @@ class PhantomConsole {
       this.prefs.audioEnabled = true;
       this.#savePrefs();
       this.audio.setVolume();
-      this.voice.enable();
       if (!silent) this.audio.sfx('sweep', { level: 0.7 });
+      this.updateControls();
+      await this.voice.enable();
+      if (!silent) this.voice.say('online', { force: true });
     }
     this.updateControls();
     return ok;
@@ -737,8 +740,8 @@ class PhantomConsole {
     // Ominous "classified" header (clearly a local simulation).
     const header = [
       ['╔══════════════════════════════════════════════╗', 'ph-boot-frame'],
-      ['║   P H A N T O M   C O N S O L E   ·  v3.7.2    ║', 'ph-boot-sigil'],
-      ['║   CLASSIFIED // CYBER OPERATIONS SIMULATOR     ║', 'ph-boot-class'],
+      [`║${'   M E T A S P L O I T   ·   v6.4.0-sim'.padEnd(46)}║`, 'ph-boot-sigil'],
+      [`║${'   CLASSIFIED // FRAMEWORK · OFFLINE SIMULATOR'.padEnd(46)}║`, 'ph-boot-class'],
       ['╚══════════════════════════════════════════════╝', 'ph-boot-frame'],
       [`  NODE 0x${hex(4)}   OPERATOR root   CLEARANCE OMEGA-9`, 'ph-boot-meta'],
       ['  ▓▒░ RESTRICTED ENVIRONMENT — AUTHORIZED USE ONLY ░▒▓', 'ph-boot-warn'],
@@ -752,7 +755,7 @@ class PhantomConsole {
     this.bootLines.appendChild(h('div', { class: 'ph-boot-line ph-boot-gap' }, ' '));
     await sl.wait(500);
     const steps = [
-      ['INITIALIZING PHANTOM CONSOLE…', 650],
+      ['INITIALIZING METASPLOIT FRAMEWORK…', 650],
       ['LOADING SYSTEM MODULES…', 900, true],
       ['ESTABLISHING LOCAL SIMULATION ENVIRONMENT…', 750],
       ['SYNCING DATA STREAMS…', 850],
@@ -801,17 +804,17 @@ class PhantomConsole {
   async banner(sl) {
     const t = this.main;
     t.blank();
-    if (this.mainCols >= 68) {
+    if (this.mainCols >= 76) {
       for (const line of BANNER) {
         t.seg([[line, 'ph-banner']], 'ph-banner-line');
         await sl.wait(55);
       }
     } else {
-      t.seg([['  ▌ P H A N T O M ▐', 'ph-banner']]);
+      t.seg([['  ▌ M E T A S P L O I T ▐', 'ph-banner']]);
     }
     t.blank();
     const info = [
-      ['       =[ ', 'phantom v3.7.2-sim'],
+      ['       =[ ', 'metasploit v6.4.0-sim'],
       ['+ -- --=[ ', `${SCENARIOS.length} scenarios · 42 modules · 0 live targets`],
       ['+ -- --=[ ', 'mode: local simulation · network: none'],
     ];
@@ -854,7 +857,7 @@ class PhantomConsole {
       this.setPaneMeta('code', snippet.file);
       return { done: this.panes.code.enqueue(snippet) };
     }
-    await this.typeCommand(sl, `phantom view ./modules/${snippet.file}`);
+    await this.typeCommand(sl, `cat ./modules/${snippet.file}`);
     await typeCode(this.main, snippet, sl, this, { speed: 0.26, sound: 0.3 });
     return { done: Promise.resolve() };
   }
@@ -953,7 +956,7 @@ class PhantomConsole {
         t.clear();
         break;
       case 'restart':
-        info('Restarting Phantom Console…');
+        info('Restarting Metasploit…');
         setTimeout(() => this.restart(), 300);
         break;
       case 'pause':
@@ -1013,7 +1016,7 @@ class PhantomConsole {
         this.setMode('auto');
         break;
       default:
-        bad(`phantom: command not found: ${cmd}`);
+        bad(`Unknown command: ${cmd}`);
         info('Type "help" for the list of demo commands.');
         this.audio.sfx('error', { level: 0.4 });
     }
@@ -1038,7 +1041,7 @@ class PhantomConsole {
 }
 
 export function mount(win) {
-  win.setTitle('Phantom Console');
+  win.setTitle('Metasploit Framework');
   const app = new PhantomConsole(win);
   win.phantom = app;
   return app;

@@ -12,7 +12,7 @@ import { alertDialog, unavailableDialog } from '../core/dialog.js';
 import { toggleWhisker } from './whisker.js';
 import { lockScreen, logoutDialog } from './session.js';
 
-const LAUNCHERS = ['files', 'terminal', 'firefox', 'phantom'];
+const LAUNCHERS = ['files', 'terminal', 'firefox', 'phantom', 'classic'];
 
 export function initPanel(panel) {
   const btn = (cls, label, html, onclick) => {

@@ -248,7 +248,7 @@ done`,
     code: `#!/usr/bin/env bash
 # Compress simulator logs older than a day and keep the newest 14 archives.
 set -euo pipefail
-cd /var/log/phantom-sim
+cd /var/log/msf-sim
 
 find . -maxdepth 1 -name '*.log' -mtime +1 -print0 |
   while IFS= read -r -d '' file; do
@@ -670,9 +670,9 @@ export class StatusSimulator {
 /* ------------------------------------------------------------- processes */
 
 const PROCS = [
-  ['phantomd', 'root'], ['collector', 'phantom'], ['sync-agent', 'phantom'], ['parser-w1', 'phantom'],
-  ['parser-w2', 'phantom'], ['indexer', 'phantom'], ['reporter', 'phantom'], ['cache-srv', 'cache'],
-  ['scheduler', 'root'], ['store-io', 'store'], ['integrityd', 'root'], ['net-sim', 'phantom'],
+  ['msfd', 'root'], ['collector', 'msf'], ['sync-agent', 'msf'], ['parser-w1', 'msf'],
+  ['parser-w2', 'msf'], ['indexer', 'msf'], ['reporter', 'msf'], ['cache-srv', 'cache'],
+  ['scheduler', 'root'], ['store-io', 'store'], ['integrityd', 'root'], ['net-sim', 'msf'],
 ];
 
 export function processTable(n = 6) {

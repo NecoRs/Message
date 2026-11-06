@@ -33,7 +33,7 @@ export const DEFAULTS = Object.freeze({
   // Network
   networking: true,
   // Menu
-  favorites: ['terminal', 'firefox', 'files', 'editor', 'phantom', 'settings'],
+  favorites: ['terminal', 'firefox', 'files', 'editor', 'phantom', 'classic', 'settings'],
   recent: [],
   // Terminal
   promptStyle: 'twoline', // 'twoline' | 'oneline' | 'classic'

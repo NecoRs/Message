@@ -20,15 +20,28 @@ export const CATEGORIES = [
 export const APPS = [
   {
     id: 'phantom',
-    name: 'Phantom Console',
-    comment: 'Cinematic cyber operations simulator',
-    exec: 'phantom-console',
+    name: 'Metasploit Framework',
+    comment: 'Penetration-testing framework — offline simulator',
+    exec: 'msfconsole',
+    aliases: ['phantom-console'], // launchers saved before the rename
     icon: 'phantom',
     categories: ['security', 'system'],
-    keywords: ['hollywood', 'hacker', 'simulator', 'matrix', 'console', 'cinematic'],
+    keywords: ['metasploit', 'msf', 'msfconsole', 'exploit', 'framework', 'hollywood', 'hacker', 'simulator', 'matrix', 'console', 'cinematic'],
     single: true,
     window: { width: 1180, height: 720, minWidth: 420, minHeight: 300 },
     load: () => import('./phantom/phantom.js'),
+  },
+  {
+    id: 'classic',
+    name: 'Metasploit Classic',
+    comment: 'The old-school black & white console — offline simulator',
+    exec: 'msfconsole-classic',
+    icon: 'classic',
+    categories: ['security', 'system'],
+    keywords: ['metasploit', 'msf', 'classic', 'retro', 'old', 'crt', 'terminal', 'black', 'white', 'monochrome', 'hacker', 'modem'],
+    single: true,
+    window: { width: 980, height: 700, minWidth: 380, minHeight: 300 },
+    load: () => import('./classic/classic.js'),
   },
   { id: 'terminal', name: 'Terminal Emulator', comment: 'Use the command line', exec: 'qterminal', icon: 'terminal', categories: ['accessories', 'system'], keywords: ['shell', 'console', 'qterminal', 'zsh'], unavailableReason: NOT_ADDED },
   { id: 'files', name: 'Thunar File Manager', comment: 'Browse the file system', exec: 'thunar', icon: 'files', categories: ['accessories', 'system'], keywords: ['folder', 'explorer', 'thunar'], unavailableReason: NOT_ADDED },
@@ -43,10 +56,9 @@ export const APPS = [
   { id: 'nmap', name: 'nmap', comment: 'Network exploration tool', exec: 'nmap', icon: 'tool-recon', categories: ['security'], unavailableReason: NOT_INCLUDED },
   { id: 'wireshark', name: 'Wireshark', comment: 'Network protocol analyzer', exec: 'wireshark', icon: 'tool-sniffing', categories: ['security'], unavailableReason: NOT_INCLUDED },
   { id: 'burpsuite', name: 'Burp Suite', comment: 'Web application testing platform', exec: 'burpsuite', icon: 'tool-web', categories: ['security'], unavailableReason: NOT_INCLUDED },
-  { id: 'metasploit', name: 'Metasploit Framework', comment: 'Penetration testing framework', exec: 'msfconsole', icon: 'tool-exploit', categories: ['security'], unavailableReason: NOT_INCLUDED },
   { id: 'john', name: 'John the Ripper', comment: 'Password auditing tool', exec: 'john', icon: 'tool-password', categories: ['security'], unavailableReason: NOT_INCLUDED },
 ];
 
 export const getApp = (id) => APPS.find((a) => a.id === id);
-export const appByExec = (exec) => APPS.find((a) => a.exec === exec || a.id === exec);
+export const appByExec = (exec) => APPS.find((a) => a.exec === exec || a.id === exec || a.aliases?.includes(exec));
 export const isAvailable = (app) => !!app?.load;

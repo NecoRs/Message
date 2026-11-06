@@ -33,8 +33,22 @@ a deeper, dirtier, more ominous character. Sources:
   boot.mp3             low_frequency_explosion_001 (Sci-Fi)
   loop-processing.mp3  computer_noise_002 (Sci-Fi)
   loop-ambience.mp3    space_engine_low_001 (Sci-Fi) + dread sub-layer
-  radio-1..3.mp3       synthesised radio squelch (generated, no sample)
+  radio-1..5.mp3       fictional police-style dispatch lines spoken by meSpeak,
+                       wrapped in a synthesised squelch, static and roger beep
 
-The system voice is spoken live by the browser's own speech engine
-(SpeechSynthesis), pitched down for a robotic/computer tone — no voice file
-is bundled.
+Voices (rendered offline with meSpeak, an espeak port, by
+tools/sounds/render_speech.cjs — the audio is program output, not covered by
+the tool's GPL licence):
+
+  voice-*-1..3.mp3     cybersecurity announcer for Metasploit Framework
+                       (robot female voice, light grit)
+  cvoice-*.mp3         old-school computer voice for Metasploit Classic
+                       (decimated + bit-crushed like an 80s speech chip)
+
+These play as ordinary page audio, so they reach Bluetooth / a car screen
+together with the rest of the site's sound.
+
+Metasploit Classic workstation sounds (generated in build_sounds.py, no
+samples): classic-key-1..4 (mechanical keyboard), classic-beep (PC speaker),
+classic-error, classic-poweron (CRT degauss), classic-hum (CRT hum loop),
+classic-modem (dial-up handshake), classic-glitch-1..2 (static bursts).

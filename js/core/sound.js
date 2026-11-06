@@ -19,13 +19,21 @@ const EFFECTS = {
   sweep: { files: ['sweep-1', 'sweep-2', 'sweep-3'], gain: 0.4, gap: 150 },
   stinger: { files: ['stinger'], gain: 0.5, gap: 800 },
   boot: { files: ['boot'], gain: 0.6, gap: 500 },
-  radio: { files: ['radio-1', 'radio-2', 'radio-3'], gain: 0.42, gap: 400 },
+  radio: { files: ['radio-1', 'radio-2', 'radio-3', 'radio-4', 'radio-5'], gain: 0.5, gap: 400 },
+  // Metasploit Classic: an old workstation
+  ckey: { files: ['classic-key-1', 'classic-key-2', 'classic-key-3', 'classic-key-4'], gain: 0.34, gap: 18 },
+  cbeep: { files: ['classic-beep'], gain: 0.3, gap: 200 },
+  cerror: { files: ['classic-error'], gain: 0.36, gap: 300 },
+  cpower: { files: ['classic-poweron'], gain: 0.6, gap: 1000 },
+  cmodem: { files: ['classic-modem'], gain: 0.42, gap: 3000 },
+  cglitch: { files: ['classic-glitch-1', 'classic-glitch-2'], gain: 0.36, gap: 250 },
 };
 
 /** Looping layers. */
 const LOOPS = {
   processing: { file: 'loop-processing', gain: 0.2, fadeIn: 0.6 },
   ambience: { file: 'loop-ambience', gain: 0.32, fadeIn: 2.5 },
+  crt: { file: 'classic-hum', gain: 0.1, fadeIn: 1.2 },
 };
 
 const MAX_VOICES = 24;
@@ -53,6 +61,13 @@ class SoundEngine {
   /** Must be called from a user gesture the first time (autoplay policy). */
   async unlock() {
     if (!this.supported) return false;
+    // Safari 17+: treat page audio as media playback, so it follows the
+    // phone's media route (Bluetooth, car) and is not muted by the ring switch.
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback';
+    } catch {
+      /* not supported */
+    }
     if (!this.ctx) this.#create();
     if (this.ctx.state !== 'running') {
       try {
@@ -118,6 +133,64 @@ class SoundEngine {
     if (!this.ctx) return Promise.resolve();
     const files = [...Object.values(EFFECTS).flatMap((e) => e.files), ...Object.values(LOOPS).map((l) => l.file)];
     return Promise.all(files.map((f) => this.#load(f)));
+  }
+
+  /** Decodes an extra set of files (e.g. the spoken voice clips). */
+  preloadFiles(files) {
+    if (!this.ctx) return Promise.resolve();
+    return Promise.all(files.map((f) => this.#load(f)));
+  }
+
+  /**
+   * Plays a spoken voice clip through the master bus — so it travels with the
+   * media audio (to a car screen, Bluetooth, cast) unlike the browser's own
+   * speech. One voice clip plays at a time. Returns false if not yet loaded.
+   */
+  voice(file, { level = 0.95 } = {}) {
+    if (!this.ready) return false;
+    const buf = this.buffers.get(file);
+    if (!buf) {
+      this.#load(file);
+      return false;
+    }
+    this.stopVoice();
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(this.master);
+    const voice = { src, g };
+    this._voice = voice;
+    src.onended = () => {
+      if (this._voice === voice) this._voice = null;
+      try {
+        src.disconnect();
+        g.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    };
+    src.start(ctx.currentTime + 0.01);
+    return true;
+  }
+
+  voiceBusy() {
+    return !!this._voice;
+  }
+
+  stopVoice() {
+    const v = this._voice;
+    this._voice = null;
+    if (!v) return;
+    try {
+      v.src.onended = null;
+      v.src.stop();
+      v.src.disconnect();
+      v.g.disconnect();
+    } catch {
+      /* already stopped */
+    }
   }
 
   #variant(name, files) {

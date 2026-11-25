@@ -100,7 +100,6 @@
   const firstLetter = (s) => (Array.from(String(s || '').trim())[0] || '').toUpperCase();
   const isTouch = matchMedia('(pointer: coarse)').matches;
   const mqMobile = matchMedia('(max-width: 899px)');
-  const mqDark = matchMedia('(prefers-color-scheme: dark)');
 
   // Direction of the first strong character, so the timestamp sits at the line end.
   function isRtl(text) {
@@ -171,7 +170,7 @@
     drafts: Object.create(null),
     active: null,
     net: 'idle',
-    theme: store.get('theme', 'auto'),
+    theme: 'dark', // dark mode only
     sound: store.get('sound', true) !== false,
     reply: null,         // { id, text, me } quoted in the next message
     blocked: store.get('blocked', {}) || {},
@@ -2737,24 +2736,12 @@
 
   // ---------------------------------------------------------------- theme
 
-  function resolvedTheme() {
-    return S.theme === 'auto' ? (mqDark.matches ? 'dark' : 'light') : S.theme;
-  }
+  // Black and white, dark mode only: there is no light theme to switch to.
   function applyTheme() {
-    const t = resolvedTheme();
-    document.documentElement.dataset.theme = t;
+    document.documentElement.dataset.theme = 'dark';
     const meta = $('meta[name="theme-color"]');
-    if (meta) meta.content = t === 'dark' ? '#0a0a0a' : '#ffffff';
-    const opts = ['light', 'auto', 'dark'];
-    $$('[data-theme-opt]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeOpt === S.theme)));
-    $('#seg-theme').style.setProperty('--idx', opts.indexOf(S.theme));
+    if (meta) meta.content = '#000000';
   }
-  function setTheme(t) {
-    S.theme = t;
-    store.set('theme', t);
-    applyTheme();
-  }
-  mqDark.addEventListener('change', () => { if (S.theme === 'auto') applyTheme(); });
 
   // ---------------------------------------------------------------- notifications setting
 
@@ -2908,7 +2895,6 @@
     });
 
     // sidebar
-    $('#btn-theme').addEventListener('click', () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'));
     $('#btn-me').addEventListener('click', () => {
       $('#in-rename').value = S.me.name;
       renderBlocked();
@@ -2968,7 +2954,6 @@
       toast('تم حفظ اسمك', { icon: 'check' });
       closeModal();
     });
-    $$('[data-theme-opt]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeOpt)));
     $('#btn-sound').addEventListener('click', () => {
       S.sound = !S.sound;
       store.set('sound', S.sound);

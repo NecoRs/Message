@@ -238,6 +238,7 @@
     stopped = false;
     setNet(navigator.onLine === false ? 'offline' : 'connecting');
 
+    loadKeys().catch(() => {});
     mbStart();
     const p = new window.Peer(CFG.prefix + S.me.id, Object.assign({ debug: 0 }, CFG.peer));
     peer = p;
@@ -358,26 +359,29 @@
     if (!isOpen(id)) setPresence(id, why);
   }
 
+  const E = window.HamsE2E;
+  const HS_WAIT = 8000;
+  const legacy = new Set();
+  const caps = store.get('caps', {}) || {};
+  function setCap(id, v) {
+    if ((caps[id] || 0) >= v) return;
+    caps[id] = v;
+    store.set('caps', caps);
+  }
+
   function adopt(conn) {
     const id = idFromPeer(conn.peer);
     if (!id) return;
-    conn.on('open', () => {
-      const d = dialing.get(id);
-      if (d && d.conn === conn) { clearTimeout(d.timer); dialing.delete(id); }
-      if (!conns.has(id)) conns.set(id, new Set());
-      conns.get(id).add(conn);
-      conn._heard = Date.now();
-      send(conn, helloMsg());
-      setPresence(id, 'online');
-      flushOutbox(id);
-      flushUnsend(id);
-      flushReceipts(id);
-    });
-    conn.on('data', (data) => {
-      conn._heard = Date.now();
-      if (data && data.t === 'bye') { try { conn.close(); } catch (_) {} drop(); return; }
-      onData(id, data);
-    });
+    conn._n = 0;
+    conn._r = -1;
+    conn._q = Promise.resolve();
+    conn._rq = Promise.resolve();
+    conn._s = null;
+    conn._ready = false;
+    let gotSession = null;
+    conn._sp = new Promise((r) => { gotSession = r; });
+    let theirHs = null;
+    let ek = null;
     const drop = () => {
       const set = conns.get(id);
       if (!set || !set.delete(conn)) return;
@@ -385,17 +389,99 @@
         conns.delete(id);
         setTyping(id, false);
         setPresence(id, 'offline');
+        onLinkLost(id);
       }
     };
+    const kill = () => { try { conn.close(); } catch (_) {} drop(); };
+    const complete = async () => {
+      if (!ek || !theirHs || conn._s) return;
+      const mine = ek;
+      ek = null;
+      try {
+        const ik = await loadKeys();
+        if (!(await acceptKey(id, theirHs.ik))) { kill(); return; }
+        conn._s = await E.session({ myId: S.me.id, theirId: id, ik, ek: mine, theirIk: theirHs.ik, theirEk: theirHs.ek, connId: conn.connectionId });
+        legacy.delete(id);
+        setCap(id, 2);
+        gotSession(conn._s);
+        sendSecure(conn, { t: 'fin', v: 2 });
+      } catch (_) { kill(); }
+    };
+    const ready = () => {
+      if (conn._ready) return;
+      conn._ready = true;
+      const d = dialing.get(id);
+      if (d && d.conn === conn) { clearTimeout(d.timer); dialing.delete(id); }
+      if (!conns.has(id)) conns.set(id, new Set());
+      const set = conns.get(id);
+      set.add(conn);
+      if (set.size > 1) {
+        const keep = [...set].sort((a, b) => (String(a.connectionId) < String(b.connectionId) ? -1 : 1))[0];
+        for (const c of [...set]) {
+          if (c === keep) continue;
+          set.delete(c);
+          setTimeout(() => { try { c.close(); } catch (_) {} }, 1500);
+        }
+        if (keep !== conn) return;
+      }
+      sendSecure(conn, helloMsg());
+      setPresence(id, 'online');
+      if (S.active === id) renderBanner();
+      flushOutbox(id);
+      flushUnsend(id);
+      flushReceipts(id);
+      onLinkReady(id);
+    };
+    conn.on('open', async () => {
+      conn._heard = Date.now();
+      setTimeout(() => {
+        if (conn._s || !conn.open) return;
+        legacy.add(id);
+        if (S.active === id) renderBanner();
+        kill();
+      }, HS_WAIT);
+      try {
+        const ik = await loadKeys();
+        const e = await E.genEphemeral();
+        ek = e;
+        send(conn, { t: 'hs', v: 2, ik: ik.pub, ek: e.pub });
+        complete();
+      } catch (_) { kill(); }
+    });
+    conn.on('data', (data) => {
+      conn._heard = Date.now();
+      if (!data || typeof data !== 'object') return;
+      if (data.t === 'hs') {
+        if (theirHs || data.v !== 2 || !E.isPub(data.ik) || !E.isPub(data.ek)) return;
+        theirHs = data;
+        complete();
+        return;
+      }
+      if (data.t === 'bye') { if (conn._ready) kill(); return; }
+      if (data.t !== 'x' || !Number.isInteger(data.n) || data.n < 0 || typeof data.c !== 'string' || data.c.length > 30000) return;
+      conn._rq = conn._rq.then(async () => {
+        const sess = await conn._sp;
+        if (!conn.open) return;
+        if (data.n !== conn._r + 1) { kill(); return; }
+        let obj;
+        try { obj = await E.openFrame(sess, data.n, data.c); } catch (_) { kill(); return; }
+        conn._r = data.n;
+        if (!obj || typeof obj !== 'object') return;
+        if (obj.t === 'fin') { ready(); return; }
+        if (!conn._ready) return;
+        if (obj.t === 'bye') { kill(); return; }
+        try { onData(id, obj); } catch (e) { console.warn('hams: frame failed', e); }
+      });
+    });
     conn.on('close', drop);
     conn.on('error', (err) => {
       if (err && err.type === 'message-too-big') return;
-      try { conn.close(); } catch (_) {}
-      drop();
+      kill();
     });
   }
 
   const MAX_FRAME = 15000;
+  const MAX_PLAIN = 10500;
   const utf8 = new TextEncoder();
   function send(conn, obj) {
     try {
@@ -404,10 +490,23 @@
       return true;
     } catch (_) { return false; }
   }
+  function sendSecure(conn, obj) {
+    if (!conn._s || !conn.open) return false;
+    let json;
+    try { json = JSON.stringify(obj); } catch (_) { return false; }
+    if (utf8.encode(json).byteLength > MAX_PLAIN) return false;
+    const n = conn._n++;
+    const sess = conn._s;
+    conn._q = conn._q.then(async () => {
+      const c = await E.sealFrame(sess, n, json);
+      if (conn.open) conn.send({ t: 'x', n, c });
+    }).catch(() => { try { conn.close(); } catch (_) {} });
+    return true;
+  }
   function sendTo(id, obj) {
     const set = conns.get(id);
     if (!set) return false;
-    for (const c of set) if (c.open && send(c, obj)) return true;
+    for (const c of set) if (c.open && c._ready && sendSecure(c, obj)) return true;
     return false;
   }
 
@@ -469,32 +568,30 @@
     return dbResolving;
   }
   let myKeys = null;
+  let keysLoading = null;
   let es = null;
   let published = false;
   const pubCache = new Map();
-  const noKey = new Set();
-  const aesCache = new Map();
   const mbReady = () => !!(DB && myKeys && S.me && owner && window.crypto && crypto.subtle);
 
-  const b64 = (u8) => { let s2 = ''; for (let i = 0; i < u8.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s2); };
-  const unb64 = (str) => Uint8Array.from(atob(str), (ch) => ch.charCodeAt(0));
-  const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
-
-  async function loadKeys() {
-    if (myKeys || !window.crypto || !crypto.subtle) return myKeys;
-    const saved = store.get('keys', null);
-    try {
-      if (saved && saved.priv && saved.pub) {
-        myKeys = { priv: await crypto.subtle.importKey('jwk', saved.priv, ECDH, false, ['deriveKey']), pub: saved.pub };
+  function loadKeys() {
+    if (myKeys) return Promise.resolve(myKeys);
+    if (!keysLoading) {
+      keysLoading = (async () => {
+        const saved = store.get('keys', null);
+        try {
+          if (saved && saved.priv && E.isPub(saved.pub)) {
+            myKeys = await E.importIdentity(saved.priv, saved.pub);
+            return myKeys;
+          }
+        } catch (_) {}
+        const { jwk, pub } = await E.genIdentity();
+        store.set('keys', { priv: jwk, pub });
+        myKeys = await E.importIdentity(jwk, pub);
         return myKeys;
-      }
-    } catch (_) {}
-    const kp = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
-    const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
-    const pub = b64(new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey)));
-    store.set('keys', { priv: privJwk, pub });
-    myKeys = { priv: await crypto.subtle.importKey('jwk', privJwk, ECDH, false, ['deriveKey']), pub };
-    return myKeys;
+      })().finally(() => { keysLoading = null; });
+    }
+    return keysLoading;
   }
 
   async function db(method, path, body) {
@@ -512,40 +609,93 @@
     try {
       const cur = await db('GET', `keys/${S.me.id}`);
       if (cur == null) await db('PUT', `keys/${S.me.id}`, myKeys.pub);
-      else if (cur !== myKeys.pub) console.warn('rawaq: a different key is registered for this ID');
+      else if (cur !== myKeys.pub) console.warn('hams: a different key is registered for this ID');
       published = true;
     } catch (_) {}
   }
 
-  async function sharedKey(id) {
-    if (aesCache.has(id)) return aesCache.get(id);
-    let pub = pubCache.get(id);
-    if (!pub) {
+  const pins = store.get('pins', {}) || {};
+  const keyChange = new Map();
+  const savePins = () => store.set('pins', pins);
+
+  async function registeredKey(id) {
+    if (pubCache.has(id)) return pubCache.get(id);
+    if (!DB && dbCandidates().length) await resolveDb();
+    if (!DB) return null;
+    try {
       const v = await db('GET', `keys/${id}`);
-      if (typeof v !== 'string' || v.length > 200) {
-        noKey.add(id);
-        if (S.active === id) renderBanner();
-        return null;
-      }
-      noKey.delete(id);
-      pub = v;
-      pubCache.set(id, pub);
+      const k = E.isPub(v) ? v : null;
+      if (k) pubCache.set(id, k);
+      return k;
+    } catch (_) { return null; }
+  }
+
+  function flagKeyChange(id, ik) {
+    if (keyChange.get(id) === ik) return;
+    keyChange.set(id, ik);
+    if (pins[id]) { pins[id].ok = false; savePins(); }
+    if (S.active === id) { renderBanner(); renderChatHead(); }
+    if (!$('#m-safety').hidden && safetyFor === id) renderSafety();
+  }
+
+  async function acceptKey(id, ik) {
+    if (keyChange.has(id)) { flagKeyChange(id, ik); return false; }
+    const pin = pins[id];
+    if (pin) {
+      if (pin.ik === ik) return true;
+      flagKeyChange(id, ik);
+      return false;
     }
-    const theirs = await crypto.subtle.importKey('raw', unb64(pub), ECDH, false, []);
-    const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: theirs }, myKeys.priv, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-    aesCache.set(id, key);
-    return key;
+    const reg = await registeredKey(id);
+    if (pins[id]) return pins[id].ik === ik;
+    if (reg && reg !== ik) {
+      pins[id] = { ik: reg, at: Date.now(), ok: false };
+      savePins();
+      flagKeyChange(id, ik);
+      return false;
+    }
+    pins[id] = { ik, at: Date.now(), ok: false };
+    savePins();
+    return true;
+  }
+
+  async function acceptNewKey(id) {
+    const ik = keyChange.get(id);
+    if (!ik) return;
+    const reg = await registeredKey(id);
+    pins[id] = { ik, at: Date.now(), ok: false };
+    if (reg && reg !== ik) pins[id].over = reg;
+    savePins();
+    keyChange.delete(id);
+    if (S.active === id) { renderBanner(); renderChatHead(); }
+    dial(id);
+    retryMailbox();
+  }
+
+  async function peerKey(id) {
+    if (keyChange.has(id)) return null;
+    const reg = await registeredKey(id);
+    const pin = pins[id];
+    if (pin) {
+      if (reg && reg !== pin.ik && reg !== pin.over) { flagKeyChange(id, reg); return null; }
+      return pin.ik;
+    }
+    if (!reg) return null;
+    pins[id] = { ik: reg, at: Date.now(), ok: false };
+    savePins();
+    return reg;
   }
 
   async function mailboxSend(to, obj) {
     if (!mbReady() || !isValidId(to) || isBlocked(to)) return false;
     try {
-      const key = await sharedKey(to);
-      if (!key) return false;
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const payload = { n: S.me.name, ph: S.me.photo ? hashStr(S.me.photo) : '', d: obj };
-      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8.encode(`${S.me.id}>${to}`) }, key, utf8.encode(JSON.stringify(payload)));
-      await db('POST', `inbox/${to}`, { f: S.me.id, iv: b64(iv), c: b64(new Uint8Array(ct)), t: Date.now() });
+      const theirIk = await peerKey(to);
+      if (!theirIk) return false;
+      const payload = { n: S.me.name, ph: S.me.photo ? hashStr(S.me.photo) : '', d: obj, v: 2, ts: Date.now() };
+      const sealed = (caps[to] || 0) >= 2
+        ? Object.assign(await E.mbSeal({ from: S.me.id, to, ik: myKeys, theirIk, obj: payload }), { v: 2 })
+        : await E.mbSealLegacy({ from: S.me.id, to, ik: myKeys, theirIk, obj: payload });
+      await db('POST', `inbox/${to}`, Object.assign({ f: S.me.id, t: Date.now() }, sealed));
       return true;
     } catch (_) {
       return false;
@@ -602,6 +752,17 @@
 
   let inboxChain = Promise.resolve();
   const handledKeys = new Set();
+  const seenEnv = store.get('seenEnv', {}) || {};
+  (() => {
+    const cut = Date.now() - 30 * 864e5;
+    const keys = Object.keys(seenEnv);
+    for (const k of keys) if (seenEnv[k] < cut) delete seenEnv[k];
+    const left = Object.keys(seenEnv);
+    if (left.length > 3000) left.sort((a, b) => seenEnv[a] - seenEnv[b]).slice(0, left.length - 3000).forEach((k) => delete seenEnv[k]);
+  })();
+  let seenTimer = 0;
+  const saveSeen = () => { clearTimeout(seenTimer); seenTimer = setTimeout(() => store.set('seenEnv', seenEnv), 500); };
+
   async function handleEnvelope(key, v) {
     if (handledKeys.has(key)) return;
     handledKeys.add(key);
@@ -609,19 +770,21 @@
     if (!v || typeof v !== 'object' || typeof v.f !== 'string' || typeof v.c !== 'string' || typeof v.iv !== 'string') return drop();
     const from = v.f;
     if (!isValidId(from) || from === S.me.id || isBlocked(from) || v.c.length > 600000) return drop();
+    const tag = v.c.slice(-32);
+    if (seenEnv[tag]) return drop();
+    let theirIk = null;
+    try { theirIk = await peerKey(from); } catch (_) {}
+    if (!theirIk) return;
     let payload = null;
-    for (let attempt = 0; attempt < 2 && !payload; attempt++) {
-      try {
-        const k = await sharedKey(from);
-        if (!k) break;
-        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(v.iv), additionalData: utf8.encode(`${from}>${S.me.id}`) }, k, unb64(v.c));
-        payload = JSON.parse(new TextDecoder().decode(pt));
-      } catch (_) {
-        aesCache.delete(from);
-        pubCache.delete(from);
-      }
-    }
+    try {
+      payload = v.v === 2 && E.isPub(v.e)
+        ? await E.mbOpen({ from, to: S.me.id, ik: myKeys, theirIk, e: v.e, iv: v.iv, c: v.c })
+        : await E.mbOpenLegacy({ from, to: S.me.id, ik: myKeys, theirIk, iv: v.iv, c: v.c });
+    } catch (_) { payload = null; }
     if (payload && typeof payload === 'object' && payload.d && typeof payload.d === 'object') {
+      seenEnv[tag] = Date.now();
+      saveSeen();
+      if (v.v === 2 || payload.v >= 2) setCap(from, 2);
       const name = cleanName(payload.n);
       if (name) heardNames.set(from, name);
       const ph = typeof payload.ph === 'string' ? payload.ph.slice(0, 16) : '';
@@ -631,7 +794,8 @@
         if (name && name !== c.name) { c.name = name; saveContacts(); refreshContact(from); }
         if (ph && c.ph !== ph && payload.d.t !== 'avatar') post(from, { t: 'avatar?' });
       }
-      try { onData(from, payload.d); } catch (e) { console.warn('rawaq: inbox item failed', e); }
+      const ts = Number.isFinite(payload.ts) ? payload.ts : 0;
+      try { onData(from, payload.d, ts); } catch (e) { console.warn('hams: inbox item failed', e); }
     }
     return drop();
   }
@@ -649,13 +813,7 @@
   }
 
   let mbState = 'off';
-  function setMbState(st) {
-    mbState = st;
-    const el = document.getElementById('mb-state');
-    if (!el) return;
-    el.textContent = { off: 'غير مفعّل', connecting: 'جارٍ الاتصال…', on: 'شغّال ✓', error: 'متعطّل — ما قدرنا نوصل لـ Firebase' }[st];
-    el.dataset.state = st;
-  }
+  function setMbState(st) { mbState = st; }
 
   async function mbStart() {
     if (es || !S.me || !owner) return;
@@ -695,7 +853,15 @@
     for (const id of conns.keys()) if (!isBlocked(id)) sendTo(id, helloMsg());
   }
 
-  function onData(id, d) {
+  function onLinkReady(id) {
+    for (const fn of linkHooks.ready) fn(id);
+  }
+  function onLinkLost(id) {
+    for (const fn of linkHooks.lost) fn(id);
+  }
+  const linkHooks = { ready: [], lost: [] };
+
+  function onData(id, d, sentAt) {
     if (!d || typeof d !== 'object' || isBlocked(id)) return;
     switch (d.t) {
       case 'hello': {
@@ -829,7 +995,7 @@
 
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
-    if (m.re) o.re = { id: m.re.id, text: m.re.text, by: m.re.me ? 's' : 'r' };
+    if (m.re) o.re = { id: m.re.id, text: String(m.re.text || '').slice(0, 300), by: m.re.me ? 's' : 'r' };
     if (m.media) o.media = { kind: m.media.kind, url: m.media.url, w: m.media.w, h: m.media.h, dur: m.media.dur };
     return o;
   }
@@ -1190,6 +1356,7 @@
     const c = S.contacts[id];
     $('#c-name').textContent = nameOf(c);
     setBadge($('#c-badge'), id);
+    renderShield();
     const av = $('#c-avatar');
     setAvatar(av, c);
     av.classList.toggle('online', S.presence.get(id) === 'online' && !isBlocked(id));
@@ -1219,13 +1386,80 @@
   function renderBanner() {
     const id = S.active;
     const wrap = $('#banner-wrap');
+    const act = $('#banner-act');
     if (!id || isBlocked(id)) { wrap.classList.remove('show'); return; }
-    const c = S.contacts[id];
-    const p = S.presence.get(id);
     let text = '';
-    if (S.net === 'offline') text = 'لا يوجد اتصال بالإنترنت';
+    let action = '';
+    if (keyChange.has(id)) { text = 'تغيّر رمز الأمان لهذا الشخص، والإرسال متوقف لين تتحقق منه'; action = 'تحقّق'; }
+    else if (legacy.has(id) && S.presence.get(id) !== 'online') text = 'الطرف الثاني يستخدم نسخة قديمة، والرسائل توصل له عبر الصندوق المشفّر';
+    else if (S.net === 'offline') text = 'لا يوجد اتصال بالإنترنت';
     if (text) $('#banner-text').textContent = text;
+    act.hidden = !action;
+    act.textContent = action;
+    wrap.classList.toggle('alert', keyChange.has(id));
     wrap.classList.toggle('show', !!text);
+  }
+
+  let safetyFor = null;
+  let safetyRun = 0;
+  function safetyKeys(id) {
+    const pending = keyChange.get(id);
+    const pin = pins[id];
+    return { mine: myKeys && myKeys.pub, theirs: pending || (pin && pin.ik) || '', pending: !!pending };
+  }
+  async function renderSafety() {
+    const id = safetyFor;
+    if (!id) return;
+    const run = ++safetyRun;
+    const c = S.contacts[id];
+    const k = safetyKeys(id);
+    const verified = !!(pins[id] && pins[id].ok) && !k.pending;
+    $('#sf-alert').hidden = !k.pending;
+    const grid = $('#sf-grid');
+    const qr = $('#sf-qr');
+    const btn = $('#sf-verify');
+    $('#sf-copy').disabled = true;
+    if (!k.mine || !k.theirs) {
+      $('#sf-text').textContent = `ما وصلنا مفتاح ${nameOf(c)} للحين. افتحوا المحادثة وأنتم الاثنين متصلين، وبعدها يطلع الرمز هنا.`;
+      grid.textContent = '';
+      qr.textContent = '';
+      btn.hidden = true;
+      return;
+    }
+    $('#sf-text').textContent = `قارن هذي الأرقام مع ${nameOf(c)} وجهاً لوجه أو بمكالمة. إذا تطابقت، محادثتكم مشفّرة بينكم أنتم الاثنين بدون أي وسيط.`;
+    grid.classList.add('loading');
+    const groups = await E.safetyNumber(S.me.id, k.mine, id, k.theirs);
+    if (run !== safetyRun) return;
+    grid.classList.remove('loading');
+    grid.textContent = '';
+    groups.forEach((g) => grid.appendChild(el('span', null, g)));
+    $('#sf-copy').disabled = false;
+    $('#sf-copy').onclick = () => copyText(groups.join(' '), 'تم نسخ رمز الأمان');
+    if (window.qrcode) {
+      const q = window.qrcode(0, 'M');
+      q.addData('HAMS-SN:' + groups.join(''));
+      q.make();
+      const n = q.getModuleCount();
+      let d = '';
+      for (let r = 0; r < n; r++) for (let cc = 0; cc < n; cc++) if (q.isDark(r, cc)) d += `M${cc} ${r}h1v1h-1z`;
+      qr.innerHTML = `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges" aria-hidden="true"><path d="${d}"/></svg>`;
+    }
+    btn.hidden = false;
+    btn.textContent = k.pending ? 'قبول الرمز الجديد' : verified ? 'إلغاء التحقق' : 'تم التحقق';
+    btn.classList.toggle('btn-primary', !verified || k.pending);
+    btn.classList.toggle('btn-soft', verified && !k.pending);
+  }
+  function openSafety(id) {
+    safetyFor = id;
+    openModal('m-safety');
+    renderSafety();
+  }
+  function renderShield() {
+    const id = S.active;
+    const on = !!(id && pins[id] && pins[id].ok && !keyChange.has(id));
+    $('#c-shield').hidden = !on;
+    const st = $('#pf-safety-state');
+    if (st) st.textContent = keyChange.has(id) ? 'تغيّر ⚠' : on ? 'تم التحقق ✓' : 'لم يتم التحقق';
   }
 
   function renderMessages(unreadId, keepScroll) {
@@ -2344,6 +2578,7 @@
     setBadge($('#pf-badge'), id);
     $('#pf-status').textContent = $('#c-status').textContent;
     $('#pf-id').textContent = id;
+    renderShield();
     $('#pf-verified').hidden = !isVerified(id);
     $('#pf-block-label').textContent = isBlocked(id) ? 'إلغاء الحظر' : 'حظر';
   }
@@ -2599,11 +2834,11 @@
     if (e.key !== 'Escape') return;
     if (!viewer.hidden) { closeViewer(); return; }
     if (!vpop.hidden) { closeBadgePop(); return; }
-    if (!profileEl.hidden) { closeProfile(); return; }
     if (!ctx.hidden) { closeCtx(); return; }
+    if (openM) { closeModal(); return; }
+    if (!profileEl.hidden) { closeProfile(); return; }
     if (S.reply && document.activeElement === input) { cancelReply(); return; }
-    if (openM) closeModal();
-    else if (S.active && mqMobile.matches) closeChat();
+    if (S.active && mqMobile.matches) closeChat();
   });
 
   function confirmBox(title, text, okLabel) {
@@ -2765,6 +3000,24 @@
       else if (e.target.closest('[data-qr]')) { renderQr(); openModal('m-qr'); }
     });
 
+    $('#banner-act').addEventListener('click', () => { if (S.active) openSafety(S.active); });
+    $('#pf-safety').addEventListener('click', () => { if (S.active) openSafety(S.active); });
+    $('#sf-verify').addEventListener('click', () => {
+      const id = safetyFor;
+      if (!id) return;
+      if (keyChange.has(id)) {
+        acceptNewKey(id).then(() => { renderSafety(); renderShield(); });
+        toast('تم قبول رمز الأمان الجديد', { icon: 'check' });
+        return;
+      }
+      if (pins[id]) {
+        pins[id].ok = !pins[id].ok;
+        savePins();
+        if (pins[id].ok) toast('تم التحقق من رمز الأمان', { icon: 'check' });
+      }
+      renderSafety();
+      renderShield();
+    });
     $('#btn-me').addEventListener('click', () => {
       $('#in-rename').value = S.me.name;
       renderBlocked();
@@ -3035,7 +3288,7 @@
     });
     window.addEventListener('pagehide', () => {
       flushSave();
-      for (const set of conns.values()) for (const c of set) send(c, { t: 'bye' });
+      for (const set of conns.values()) for (const c of set) if (c._ready) send(c, { t: 'bye' });
       if (peer) { try { peer.destroy(); } catch (_) {} }
     });
     window.addEventListener('pageshow', (e) => { if (e.persisted && owner && S.me) netStart(); });

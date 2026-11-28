@@ -52,7 +52,7 @@ export function fakeFirebase(port) {
         if (!streams.has(id)) streams.set(id, new Set());
         streams.get(id).add(res);
         const ka = setInterval(() => res.write('event: keep-alive\ndata: null\n\n'), 15000);
-        req.on('close', () => { clearInterval(ka); streams.get(id).delete(res); });
+        res.on('close', () => { clearInterval(ka); streams.get(id).delete(res); });
         return;
       }
       if (root === 'keys') {

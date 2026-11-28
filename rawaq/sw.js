@@ -7,6 +7,7 @@ const SHELL = [
   'vendor/peerjs.min.js',
   'vendor/qrcode.min.js',
   'config.js',
+  'e2e.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

@@ -34,7 +34,7 @@ const OBF = {
   unicodeEscapeSequence: false,
   stringArray: true,
   stringArrayEncoding: ['base64'],
-  stringArrayThreshold: 0.75,
+  stringArrayThreshold: 1,
   stringArrayRotate: true,
   stringArrayShuffle: true,
   stringArrayIndexShift: true,

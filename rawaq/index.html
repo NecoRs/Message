@@ -241,6 +241,9 @@
               <span class="who-line"><b id="c-name" dir="auto"></b><span class="vslot" id="c-badge"></span><span class="shield-slot" id="c-shield" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shield"/></svg></span></span>
               <span class="status" id="c-status"></span>
             </div>
+            <button class="icon-btn ghost" id="btn-find" type="button" aria-label="ابحث في المحادثة">
+              <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+            </button>
             <button class="icon-btn ghost" id="btn-chat-menu" type="button" aria-label="خيارات المحادثة">
               <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg>
             </button>
@@ -254,6 +257,24 @@
                 <button class="banner-act" id="banner-act" type="button" hidden></button>
               </div>
             </div>
+          </div>
+
+          <div class="pin-bar" id="pin-bar" hidden>
+            <button class="pin-main" id="pin-open" type="button">
+              <svg class="i" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3.5 3.5v1.5h-11v-1.5L10 9Z"/><path d="M12 14v6"/></svg>
+              <span class="pin-body"><b>رسالة مثبّتة</b><span id="pin-text" dir="auto"></span></span>
+            </button>
+            <button class="icon-btn ghost" id="pin-x" type="button" aria-label="إلغاء التثبيت"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+
+          <div class="find-bar" id="find-bar" hidden>
+            <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+            <label class="sr-only" for="find-q">ابحث في المحادثة</label>
+            <input id="find-q" type="search" placeholder="ابحث في المحادثة" dir="auto" autocomplete="off" enterkeyhint="search">
+            <span class="find-n" id="find-n"></span>
+            <button class="icon-btn ghost" id="find-up" type="button" aria-label="النتيجة الأقدم"><svg class="i" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
+            <button class="icon-btn ghost" id="find-down" type="button" aria-label="النتيجة الأحدث"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="icon-btn ghost" id="find-x" type="button" aria-label="إغلاق البحث"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
 
           <div class="scroller" id="scroller">
@@ -283,9 +304,19 @@
                 </div>
               </div>
             </div>
+            <div class="emoji-panel" id="emoji-panel" hidden>
+              <div class="emoji-head">
+                <span class="emoji-title" id="emoji-title"></span>
+                <div class="emoji-tabs" id="emoji-tabs" role="tablist"></div>
+              </div>
+              <div class="emoji-grid" id="emoji-grid" role="listbox" aria-label="الإيموجي"></div>
+            </div>
             <div class="composer-box">
               <button class="attach" id="btn-attach" type="button" aria-label="إرسال ملف أو صورة">
                 <svg class="i" viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
+              </button>
+              <button class="attach" id="btn-emoji" type="button" aria-label="إيموجي">
+                <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.4"/></svg>
               </button>
               <input type="file" id="in-media" hidden>
               <label class="sr-only" for="input">رسالتك</label>
@@ -451,6 +482,11 @@
         <span>ثبّت همس كتطبيق</span>
         <span class="row-btn-state" id="install-state"></span>
       </button>
+      <button class="row-btn" id="btn-starred" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/></svg>
+        <span>الرسائل المميّزة</span>
+        <span class="row-btn-state" id="starred-count"></span>
+      </button>
       <button class="row-btn" id="btn-blocked" type="button">
         <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
         <span>المحظورون</span>
@@ -588,6 +624,22 @@
           <span>نسخ النص</span>
           <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
         </button>
+        <button type="button" role="menuitem" data-act="edit">
+          <span>تعديل</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z"/><path d="m13.5 6.5 4 4"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="forward">
+          <span>تحويل</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="m14 8 5 4-5 4"/><path d="M19 12h-9a5 5 0 0 0-5 5v1"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="pin">
+          <span id="ctx-pin-label">تثبيت</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3.5 3.5v1.5h-11v-1.5L10 9Z"/><path d="M12 14v6"/></svg>
+        </button>
+        <button type="button" role="menuitem" data-act="star">
+          <span id="ctx-star-label">تمييز</span>
+          <svg class="i" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/></svg>
+        </button>
         <button type="button" role="menuitem" data-act="unsend" class="danger">
           <span>حذف لدى الجميع</span>
           <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/><path d="m9.5 11.5 5 5M14.5 11.5l-5 5"/></svg>
@@ -638,6 +690,33 @@
     </div>
   </div>
 
+  <div class="modal" id="m-forward" role="dialog" aria-modal="true" aria-labelledby="m-forward-title" hidden>
+    <div class="backdrop" data-close></div>
+    <form class="sheet sheet-sm" id="f-forward" novalidate>
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-forward-title">تحويل إلى</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <ul class="pick-list" id="fw-list"></ul>
+      <p class="muted" id="fw-empty" hidden>ما عندك محادثات ثانية</p>
+      <button class="btn btn-primary btn-block" type="submit" id="fw-send" disabled>تحويل</button>
+    </form>
+  </div>
+
+  <div class="modal" id="m-starred" role="dialog" aria-modal="true" aria-labelledby="m-starred-title" hidden>
+    <div class="backdrop" data-close></div>
+    <div class="sheet">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <h3 id="m-starred-title">الرسائل المميّزة</h3>
+        <button class="icon-btn ghost" type="button" data-close aria-label="إغلاق"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <ul class="star-list" id="star-list"></ul>
+      <p class="muted star-empty" id="star-empty">ما فيه رسائل مميّزة. اضغط مطوّلاً على أي رسالة واختر «تمييز».</p>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <noscript><p class="noscript">همس يحتاج تفعيل JavaScript.</p></noscript>
@@ -646,6 +725,7 @@
   <script src="vendor/qrcode.min.js"></script>
   <script src="config.js"></script>
   <script src="e2e.js"></script>
+  <script src="emoji.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

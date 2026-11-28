@@ -58,6 +58,11 @@
     file: '<path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5Z"/><path d="M14 3v5.5h5.5"/>',
     download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
     pause: '<rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/>',
+    edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z"/><path d="m13.5 6.5 4 4"/>',
+    forward: '<path d="m14 8 5 4-5 4"/><path d="M19 12h-9a5 5 0 0 0-5 5v1"/>',
+    pin: '<path d="M9 4h6l-1 5 3.5 3.5v1.5h-11v-1.5L10 9Z"/><path d="M12 14v6"/>',
+    star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   };
   const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
@@ -158,6 +163,8 @@
     theme: 'dark',
     sound: store.get('sound', true) !== false,
     reply: null,
+    editing: null,
+    find: null,
     blocked: store.get('blocked', {}) || {},
     query: '',
     presence: new Map(),
@@ -893,6 +900,8 @@
       case 'read': if (Array.isArray(d.ids)) markMine(id, d.ids.slice(0, 2000), 'read'); break;
       case 'typing': setTyping(id, !!d.on); break;
       case 'react': onReact(id, d); break;
+      case 'edit': onEdit(id, d); break;
+      case 'pin': onPin(id, d); break;
       case 'unsend': onUnsend(id, d); break;
       case 'unsent': case 'unsend-no': onUnsendReply(id, d); break;
       default: break;
@@ -913,6 +922,8 @@
     const ts = Number.isFinite(d.ts) && d.ts > 0 ? Math.min(d.ts, Date.now()) : Date.now();
     const m = { id: d.id, me: false, text, ts, seen: false, rr: false };
     if (media) m.media = media;
+    if (d.fw) m.fw = true;
+    if (Number.isFinite(d.ed) && d.ed > 0) m.ed = d.ed;
     const re = d.re;
     if (re && typeof re === 'object' && typeof re.id === 'string' && re.id.length <= 40 && typeof re.text === 'string') {
       m.re = { id: re.id, text: cleanText(re.text).slice(0, 160), me: re.by === 'r' };
@@ -997,6 +1008,8 @@
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
     if (m.re) o.re = { id: m.re.id, text: String(m.re.text || '').slice(0, 300), by: m.re.me ? 's' : 'r' };
+    if (m.fw) o.fw = 1;
+    if (m.ed) o.ed = m.ed;
     if (m.media) o.media = Object.assign({}, m.media);
     return o;
   }
@@ -1006,9 +1019,14 @@
     for (const m of msgsOf(id)) {
       if (m.me && (m.st === 'pending' || m.st === 'sent') && !sendTo(id, wireMsg(m))) break;
       if (m.rxp && sendTo(id, { t: 'react', id: m.id, e: (m.rx && m.rx.me) || '' })) { delete m.rxp; changed = true; }
+      if (m.edp && sendTo(id, { t: 'edit', id: m.id, text: m.text, ts: m.ed })) { delete m.edp; changed = true; }
     }
     if (changed) saveMsgs(id);
+    const c = S.contacts[id];
+    if (c && c.pinp && sendTo(id, { t: 'pin', id: c.pin || '', ts: c.pinAt || Date.now() })) { delete c.pinp; saveContacts(); }
   }
+
+  const isEmoji = (s) => typeof s === 'string' && s.length > 0 && s.length <= 16 && !/[\s<>"'&]/.test(s) && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(s);
 
   function findMsg(id, mid) {
     return msgsOf(id).find((m) => m.id === mid) || null;
@@ -1018,7 +1036,7 @@
     if (typeof d.id !== 'string') return;
     const m = findMsg(id, d.id);
     if (!m) return;
-    const e = REACTS.includes(d.e) ? d.e : '';
+    const e = isEmoji(d.e) ? d.e : '';
     m.rx = m.rx || {};
     if (e) m.rx.them = e; else delete m.rx.them;
     saveMsgs(id);
@@ -1297,12 +1315,15 @@
     autosize();
     updateSend();
     cancelReply();
+    closeFind();
+    closeEmoji();
     renderComposer();
     renderChatHead(true);
     const firstUnread = msgsOf(id).find((m) => !m.me && !m.seen);
     renderMessages(firstUnread && firstUnread.id);
     $('#typing').classList.toggle('show', S.typing.has(id));
     renderBanner();
+    renderPin();
     markSeen(id);
     renderList();
     if (!isOpen(id)) dial(id);
@@ -1313,10 +1334,13 @@
     const id = S.active;
     if (!id) return;
     closeProfile(true);
-    S.drafts[id] = input.value;
     stopTyping(id);
+    if (S.editing) cancelEdit();
+    else S.drafts[id] = input.value;
     cancelReply();
     closeCtx();
+    closeFind();
+    closeEmoji();
   }
 
   function closeChat(fromPop) {
@@ -1542,6 +1566,8 @@
     if (!m.media && isJumbo(m.text)) row.classList.add('jumbo');
     const b = el('div', 'bubble');
     if (!isRtl(m.text)) b.classList.add('ltr');
+    if (m.fw) b.appendChild(el('span', 'fw-label', '↪ محوّلة'));
+    if (S.contacts[S.active] && S.contacts[S.active].pin === m.id) row.classList.add('pinned');
     if (m.re) {
       const q = el('button', 'quote');
       q.type = 'button';
@@ -1562,10 +1588,14 @@
       const p = el('p', 'text');
       p.dir = 'auto';
       linkify(p, m.text);
-      p.appendChild(el('span', 'meta-space'));
+      const sp = el('span', 'meta-space');
+      if (m.ed || m.star) sp.style.width = `calc(var(--ms, 46px) + ${(m.ed ? 46 : 0) + (m.star ? 16 : 0)}px)`;
+      p.appendChild(sp);
       b.appendChild(p);
     }
     const meta = el('span', 'meta');
+    if (m.star) meta.insertAdjacentHTML('beforeend', `<span class="m-star" aria-label="مميّزة">${svg('star')}</span>`);
+    if (m.ed) meta.appendChild(el('span', 'm-ed', 'مُعدّلة'));
     const t = el('time', null, fTime.format(m.ts));
     t.dateTime = new Date(m.ts).toISOString();
     meta.appendChild(t);
@@ -1720,6 +1750,17 @@
     sendBtn.classList.remove('fly');
     void sendBtn.offsetWidth;
     sendBtn.classList.add('fly');
+    if (S.editing) {
+      const m = S.editing.m;
+      const draft = S.editing.draft;
+      S.editing = null;
+      $('#reply-wrap').classList.remove('show', 'editing');
+      editMsg(m, text);
+      input.value = draft || '';
+      autosize();
+      updateSend();
+      return;
+    }
     const re = S.reply;
     cancelReply();
     sendMessage(text, re);
@@ -1736,9 +1777,333 @@
   }
   function cancelReply() {
     S.reply = null;
-    $('#reply-wrap').classList.remove('show');
+    if (S.editing) cancelEdit(true);
+    $('#reply-wrap').classList.remove('show', 'editing');
   }
   $('#reply-x').addEventListener('click', () => { cancelReply(); input.focus({ preventScroll: true }); });
+
+  function startEdit(m) {
+    if (!S.active || !m.me) return;
+    cancelReply();
+    S.editing = { m, draft: input.value };
+    $('#reply-name').textContent = 'تعديل الرسالة';
+    $('#reply-text').textContent = mediaLabel(m).replace(/\s+/g, ' ');
+    $('#reply-wrap').classList.add('show', 'editing');
+    input.value = m.text || '';
+    autosize();
+    updateSend();
+    input.focus({ preventScroll: true });
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch (_) {}
+  }
+  function cancelEdit(keepBar) {
+    const ed = S.editing;
+    if (!ed) return;
+    S.editing = null;
+    input.value = ed.draft || '';
+    autosize();
+    updateSend();
+    if (!keepBar) $('#reply-wrap').classList.remove('show', 'editing');
+  }
+  function editMsg(m, text) {
+    const id = S.active;
+    if (!id || !m.me) return;
+    if (text === m.text) return;
+    if (!text && !m.media) return;
+    m.text = text;
+    m.ed = Date.now();
+    m.edp = true;
+    saveMsgs(id);
+    const list = msgsOf(id);
+    const c = S.contacts[id];
+    if (c && list[list.length - 1] === m) { c.last = { text: mediaLabel(m).slice(0, 140), me: true, ts: m.ts }; saveContacts(); renderList(); }
+    refreshRow(m);
+    if (m.st === 'pending' || m.st === 'uploading') return;
+    post(id, { t: 'edit', id: m.id, text: m.text, ts: m.ed }).then((ok) => { if (ok) { delete m.edp; saveMsgs(id); } });
+  }
+  function onEdit(id, d) {
+    if (typeof d.id !== 'string' || !Number.isFinite(d.ts)) return;
+    const m = findMsg(id, d.id);
+    if (!m || m.me) return;
+    if (d.ts <= (m.ed || 0)) return;
+    const text = cleanText(d.text).trim();
+    if (!text && !m.media) return;
+    m.text = text;
+    m.ed = Math.min(d.ts, Date.now() + 60000);
+    saveMsgs(id);
+    const list = msgsOf(id);
+    const c = S.contacts[id];
+    if (c && list[list.length - 1] === m) { c.last = { text: mediaLabel(m).slice(0, 140), me: false, ts: m.ts }; saveContacts(); renderList(); }
+    if (S.active === id) { refreshRow(m); if (S.find) runFind(true); }
+  }
+
+  function renderPin() {
+    const id = S.active;
+    const bar = $('#pin-bar');
+    const c = id && S.contacts[id];
+    const m = c && c.pin ? findMsg(id, c.pin) : null;
+    bar.hidden = !m;
+    if (m) $('#pin-text').textContent = mediaLabel(m).replace(/\s+/g, ' ') || '…';
+    $$('.msg.pinned', box).forEach((r) => r.classList.remove('pinned'));
+    if (m) { const row = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`); if (row) row.classList.add('pinned'); }
+  }
+  function setPin(id, mid) {
+    const c = id && S.contacts[id];
+    if (!c) return;
+    c.pin = mid || '';
+    c.pinAt = Date.now();
+    c.pinp = true;
+    saveContacts();
+    if (S.active === id) renderPin();
+    toast(mid ? 'تم تثبيت الرسالة' : 'تم إلغاء التثبيت', { icon: 'check' });
+    post(id, { t: 'pin', id: c.pin, ts: c.pinAt }).then((ok) => { if (ok) { delete c.pinp; saveContacts(); } });
+  }
+  function onPin(id, d) {
+    const c = S.contacts[id];
+    if (!c || !Number.isFinite(d.ts) || d.ts <= (c.pinAt || 0)) return;
+    if (d.id !== '' && (typeof d.id !== 'string' || d.id.length > 40)) return;
+    c.pin = d.id;
+    c.pinAt = d.ts;
+    delete c.pinp;
+    saveContacts();
+    if (S.active === id) renderPin();
+  }
+
+  function toggleStar(m) {
+    const id = S.active;
+    if (!id) return;
+    if (m.star) delete m.star; else m.star = true;
+    saveMsgs(id);
+    refreshRow(m);
+    toast(m.star ? 'تم تمييز الرسالة' : 'تم إلغاء التمييز', { icon: 'check' });
+  }
+  function starredAll() {
+    const out = [];
+    for (const cid of Object.keys(S.contacts)) for (const m of msgsOf(cid)) if (m.star) out.push({ cid, m });
+    return out.sort((a, b) => b.m.ts - a.m.ts);
+  }
+  function renderStarCount() {
+    const n = starredAll().length;
+    $('#starred-count').textContent = n ? String(n) : '';
+  }
+  function openStarred() {
+    const ul = $('#star-list');
+    ul.textContent = '';
+    const all = starredAll();
+    $('#star-empty').hidden = !!all.length;
+    for (const { cid, m } of all) {
+      const li = el('li');
+      const b = el('button', 'star-item');
+      b.type = 'button';
+      const top = el('span', 'star-top');
+      top.append(el('b', null, m.me ? 'أنت' : nameOf(S.contacts[cid])), el('span', 'star-chat', m.me ? '← ' + nameOf(S.contacts[cid]) : ''), el('time', null, listTime(m.ts)));
+      const txt = el('span', 'star-text', mediaLabel(m).replace(/\s+/g, ' '));
+      txt.dir = 'auto';
+      b.append(top, txt);
+      b.addEventListener('click', () => {
+        closeModal(true);
+        openChat(cid);
+        setTimeout(() => jumpTo(m.id), mqMobile.matches ? 480 : 80);
+      });
+      li.appendChild(b);
+      ul.appendChild(li);
+    }
+    openModal('m-starred');
+  }
+
+  let fwMsg = null;
+  function openForward(m) {
+    fwMsg = m;
+    const ul = $('#fw-list');
+    ul.textContent = '';
+    const ids = Object.keys(S.contacts).filter((cid) => !isBlocked(cid)).sort((a, b) => (S.contacts[b].updated || 0) - (S.contacts[a].updated || 0));
+    $('#fw-empty').hidden = ids.length > 0;
+    for (const cid of ids) {
+      const li = el('li');
+      const lab = el('label', 'pick');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.value = cid;
+      const av = el('span', 'avatar sm');
+      setAvatar(av, S.contacts[cid]);
+      const nm = el('span', 'pick-name', nameOf(S.contacts[cid]));
+      nm.dir = 'auto';
+      lab.append(cb, av, nm, el('span', 'pick-box'));
+      li.appendChild(lab);
+      ul.appendChild(li);
+    }
+    $('#fw-send').disabled = true;
+    $('#fw-send').textContent = 'تحويل';
+    openModal('m-forward');
+  }
+  function forwardTo(ids) {
+    const src = fwMsg;
+    if (!src) return;
+    for (const cid of ids) {
+      const c = S.contacts[cid];
+      if (!c || isBlocked(cid)) continue;
+      const m = { id: msgId(), me: true, text: src.text || '', ts: Date.now(), st: 'pending', fw: true };
+      if (src.media) m.media = Object.assign({}, src.media);
+      const list = msgsOf(cid);
+      list.push(m);
+      trim(list);
+      saveMsgs(cid);
+      c.last = { text: mediaLabel(m).slice(0, 140), me: true, ts: m.ts };
+      c.updated = Date.now();
+      if (S.active === cid) appendMessage(m, true);
+      dispatch(cid, m);
+    }
+    saveContacts();
+    renderList();
+    toast(ids.length > 1 ? `تم التحويل إلى ${ids.length} محادثات` : 'تم التحويل', { icon: 'check' });
+  }
+
+  let findHl = null;
+  function openFind() {
+    if (!S.active) return;
+    S.find = { q: '', hits: [], i: -1 };
+    $('#find-bar').hidden = false;
+    $('#find-q').value = '';
+    $('#find-n').textContent = '';
+    $('#find-q').focus({ preventScroll: true });
+  }
+  function closeFind() {
+    if (!S.find) return;
+    S.find = null;
+    $('#find-bar').hidden = true;
+    if (window.CSS && CSS.highlights) CSS.highlights.delete('hams-find');
+    $$('.msg.find-cur', box).forEach((r) => r.classList.remove('find-cur'));
+  }
+  function runFind(keepIndex) {
+    const f = S.find;
+    if (!f || !S.active) return;
+    const q = $('#find-q').value.trim().toLowerCase();
+    f.q = q;
+    const prev = f.hits[f.i];
+    f.hits = q ? msgsOf(S.active).filter((m) => ((m.text || '') + ' ' + ((m.media && m.media.name) || '')).toLowerCase().includes(q)).map((m) => m.id) : [];
+    f.i = keepIndex && prev && f.hits.includes(prev) ? f.hits.indexOf(prev) : f.hits.length - 1;
+    paintFind(true);
+  }
+  function stepFind(dir) {
+    const f = S.find;
+    if (!f || !f.hits.length) return;
+    f.i = (f.i + dir + f.hits.length) % f.hits.length;
+    paintFind(true);
+  }
+  function paintFind(scroll) {
+    const f = S.find;
+    if (!f) return;
+    $('#find-n').textContent = !f.q ? '' : f.hits.length ? `${f.i + 1}/${f.hits.length}` : 'لا نتائج';
+    $('#find-up').disabled = $('#find-down').disabled = f.hits.length < 2;
+    $$('.msg.find-cur', box).forEach((r) => r.classList.remove('find-cur'));
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      const ranges = [];
+      if (f.q) {
+        for (const p of $$('.msg .text', box)) {
+          const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            const low = node.data.toLowerCase();
+            let at = low.indexOf(f.q);
+            while (at >= 0) {
+              const r = new Range();
+              r.setStart(node, at);
+              r.setEnd(node, Math.min(node.data.length, at + f.q.length));
+              ranges.push(r);
+              at = low.indexOf(f.q, at + f.q.length);
+            }
+          }
+        }
+      }
+      findHl = new Highlight(...ranges);
+      CSS.highlights.set('hams-find', findHl);
+    }
+    const id = f.hits[f.i];
+    if (!id) return;
+    const row = box.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+    if (!row) return;
+    row.classList.add('find-cur');
+    if (scroll) row.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' });
+  }
+
+  let emojiMode = 'insert';
+  let emojiMsg = null;
+  let emojiTab = '';
+  const emojiRecent = () => (store.get('emojiRecent', []) || []).filter(isEmoji).slice(0, 32);
+  function emojiGroups() {
+    const rec = emojiRecent();
+    const groups = (window.HamsEmoji || []).slice();
+    if (rec.length) groups.unshift({ id: 'recent', label: 'الأخيرة', icon: '🕘', list: rec });
+    return groups;
+  }
+  function renderEmojiTabs() {
+    const tabs = $('#emoji-tabs');
+    tabs.textContent = '';
+    const groups = emojiGroups();
+    if (!groups.some((g) => g.id === emojiTab)) emojiTab = groups.length ? groups[0].id : '';
+    for (const g of groups) {
+      const b = el('button', 'emoji-tab' + (g.id === emojiTab ? ' on' : ''), g.icon);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(g.id === emojiTab));
+      b.setAttribute('aria-label', g.label);
+      b.title = g.label;
+      b.addEventListener('click', () => { emojiTab = g.id; renderEmojiTabs(); renderEmojiGrid(); });
+      tabs.appendChild(b);
+    }
+  }
+  function renderEmojiGrid() {
+    const grid = $('#emoji-grid');
+    grid.textContent = '';
+    const g = emojiGroups().find((x) => x.id === emojiTab);
+    if (!g) return;
+    const frag = document.createDocumentFragment();
+    for (const e of g.list) {
+      const b = el('button', 'emoji', e);
+      b.type = 'button';
+      b.dataset.emoji = e;
+      frag.appendChild(b);
+    }
+    grid.appendChild(frag);
+    grid.scrollTop = 0;
+  }
+  function openEmoji(mode, msg) {
+    if (!S.active || isBlocked(S.active)) return;
+    emojiMode = mode || 'insert';
+    emojiMsg = msg || null;
+    $('#emoji-title').textContent = emojiMode === 'react' ? 'اختر تفاعل' : '';
+    renderEmojiTabs();
+    renderEmojiGrid();
+    $('#emoji-panel').hidden = false;
+    $('#btn-emoji').classList.add('on');
+  }
+  function closeEmoji() {
+    if ($('#emoji-panel').hidden) return;
+    $('#emoji-panel').hidden = true;
+    $('#btn-emoji').classList.remove('on');
+    emojiMsg = null;
+  }
+  function useEmoji(e) {
+    const rec = [e, ...emojiRecent().filter((x) => x !== e)].slice(0, 32);
+    store.set('emojiRecent', rec);
+    if (emojiMode === 'react' && emojiMsg) {
+      const msg = emojiMsg;
+      closeEmoji();
+      react(msg, e);
+      return;
+    }
+    const a = input.selectionStart ?? input.value.length;
+    const b = input.selectionEnd ?? input.value.length;
+    input.setRangeText(e, a, b, 'end');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!isTouch) input.focus({ preventScroll: true });
+  }
+  $('#emoji-grid').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-emoji]');
+    if (b) useEmoji(b.dataset.emoji);
+  });
+  $('#btn-emoji').addEventListener('click', () => { if ($('#emoji-panel').hidden || emojiMode !== 'insert') openEmoji('insert'); else closeEmoji(); });
+  $('#btn-emoji').addEventListener('pointerdown', (e) => { if (document.activeElement === input) e.preventDefault(); });
+  $('#emoji-panel').addEventListener('pointerdown', (e) => { if (document.activeElement === input && e.target.closest('button')) e.preventDefault(); });
   $('#reply-x').addEventListener('pointerdown', (e) => { if (document.activeElement === input) e.preventDefault(); });
 
   function jumpTo(mid) {
@@ -1860,7 +2225,20 @@
       b.addEventListener('click', () => { const msg = ctxMsg; closeCtx(); if (msg) react(msg, e); });
       rr.appendChild(b);
     });
+    const plusB = el('button', 'react more');
+    plusB.type = 'button';
+    plusB.style.setProperty('--k', REACTS.length);
+    plusB.setAttribute('aria-label', 'تفاعلات أكثر');
+    plusB.innerHTML = svg('plus');
+    plusB.addEventListener('click', () => { const msg = ctxMsg; closeCtx(); if (msg) openEmoji('react', msg); });
+    rr.appendChild(plusB);
     $('[data-act="copy"]', ctxCard).hidden = !m.text;
+    const ready = !m.media || m.media.v || m.media.url;
+    $('[data-act="edit"]', ctxCard).hidden = !(m.me && (m.text || m.media) && m.st !== 'uploading' && m.st !== 'failed' && !isBlocked(S.active));
+    $('[data-act="forward"]', ctxCard).hidden = !(ready && m.st !== 'uploading' && m.st !== 'failed');
+    const pinned = (S.contacts[S.active] || {}).pin === m.id;
+    $('#ctx-pin-label').textContent = pinned ? 'إلغاء التثبيت' : 'تثبيت';
+    $('#ctx-star-label').textContent = m.star ? 'إلغاء التمييز' : 'تمييز';
     $('[data-act="unsend"]', ctxCard).hidden = !(m.me && m.st !== 'read' && !isBlocked(S.active));
     ctx.hidden = false;
     row.classList.add('held');
@@ -1914,6 +2292,10 @@
     closeCtx();
     if (act.dataset.act === 'reply') startReply(m);
     else if (act.dataset.act === 'copy') copyText(m.text, 'تم نسخ الرسالة');
+    else if (act.dataset.act === 'edit') startEdit(m);
+    else if (act.dataset.act === 'forward') openForward(m);
+    else if (act.dataset.act === 'pin') setPin(S.active, (S.contacts[S.active] || {}).pin === m.id ? '' : m.id);
+    else if (act.dataset.act === 'star') toggleStar(m);
     else if (act.dataset.act === 'unsend') {
       if (m.st === 'read') { toast('تمت قراءتها', { icon: 'alert' }); return; }
       const ok = await confirmBox('حذف لدى الجميع؟', '', 'حذف');
@@ -3178,6 +3560,9 @@
     if (!vpop.hidden) { closeBadgePop(); return; }
     if (!ctx.hidden) { closeCtx(); return; }
     if (openM) { closeModal(); return; }
+    if (!$('#emoji-panel').hidden) { closeEmoji(); return; }
+    if (S.find) { closeFind(); return; }
+    if (S.editing) { cancelReply(); return; }
     if (!profileEl.hidden) { closeProfile(); return; }
     if (S.reply && document.activeElement === input) { cancelReply(); return; }
     if (S.active && mqMobile.matches) closeChat();
@@ -3343,6 +3728,30 @@
     });
 
     $('#banner-act').addEventListener('click', () => { if (S.active) openSafety(S.active); });
+    $('#btn-find').addEventListener('click', () => { if (S.find) closeFind(); else openFind(); });
+    $('#find-q').addEventListener('input', () => runFind(false));
+    $('#find-q').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? 1 : -1); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
+    });
+    $('#find-up').addEventListener('click', () => stepFind(-1));
+    $('#find-down').addEventListener('click', () => stepFind(1));
+    $('#find-x').addEventListener('click', closeFind);
+    $('#pin-open').addEventListener('click', () => { const c = S.contacts[S.active]; if (c && c.pin) jumpTo(c.pin); });
+    $('#pin-x').addEventListener('click', () => { if (S.active) setPin(S.active, ''); });
+    $('#btn-starred').addEventListener('click', openStarred);
+    $('#fw-list').addEventListener('change', () => {
+      const n = $$('#fw-list input:checked').length;
+      $('#fw-send').disabled = !n;
+      $('#fw-send').textContent = n > 1 ? `تحويل إلى ${n}` : 'تحويل';
+    });
+    $('#f-forward').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const ids = $$('#fw-list input:checked').map((x) => x.value);
+      if (!ids.length) return;
+      closeModal();
+      forwardTo(ids);
+    });
     $('#pf-safety').addEventListener('click', () => { if (S.active) openSafety(S.active); });
     $('#sf-verify').addEventListener('click', () => {
       const id = safetyFor;
@@ -3361,6 +3770,7 @@
       renderShield();
     });
     $('#btn-me').addEventListener('click', () => {
+      renderStarCount();
       $('#in-rename').value = S.me.name;
       renderBlocked();
       renderNotify();

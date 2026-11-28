@@ -565,8 +565,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   unicode-bidi: plaintext;
 }
 .text a { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.meta-space { display: inline-block; width: 46px; height: 1px; }
-.msg.me .meta-space { width: 64px; }
+.meta-space { --ms: 46px; display: inline-block; width: var(--ms); height: 1px; }
+.msg.me .meta-space { --ms: 64px; }
 .meta {
   position: absolute;
   bottom: 6px; left: 12px;
@@ -1564,3 +1564,78 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   content: ''; position: absolute; width: 38px; height: 38px; border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, .25); border-top-color: #fff; animation: spin 0.9s linear infinite;
 }
+
+.chat-pane > .pin-bar, .chat-pane > .find-bar { flex: none; }
+.pin-bar {
+  display: flex; align-items: center; gap: 4px;
+  margin: 8px 14px 0; padding: 4px 4px 4px 4px;
+  border-radius: 14px; background: var(--bg-2); border: 1px solid var(--line);
+  animation: rise .35s var(--ease) both;
+}
+.pin-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 4px 10px; text-align: start; }
+.pin-main > .i { flex: none; width: 18px; height: 18px; color: var(--muted); }
+.pin-body { display: grid; min-width: 0; line-height: 1.35; }
+.pin-body b { font-size: 12px; font-weight: 600; color: var(--muted); }
+.pin-body span { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-bar .icon-btn { width: 34px; height: 34px; }
+.msg.pinned .bubble { box-shadow: 0 0 0 1.5px var(--fg-2); }
+.find-bar {
+  display: flex; align-items: center; gap: 4px;
+  margin: 8px 14px 0; padding: 4px 6px 4px 12px;
+  border-radius: 14px; background: var(--bg-2); border: 1px solid var(--line-2);
+  animation: rise .3s var(--ease) both;
+}
+.find-bar > .i { flex: none; width: 18px; height: 18px; color: var(--muted); }
+.find-bar input { flex: 1; min-width: 0; height: 36px; border: 0; background: none; outline: none; font-size: 14.5px; padding: 0 8px; }
+.find-bar input::-webkit-search-cancel-button { display: none; }
+.find-n { flex: none; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); direction: ltr; min-width: 34px; text-align: center; }
+.find-bar .icon-btn { width: 34px; height: 34px; }
+.find-bar .icon-btn:disabled { opacity: .3; }
+::highlight(hams-find) { background-color: #ffffff; color: #000000; }
+.msg.find-cur .bubble { box-shadow: 0 0 0 2px var(--fg); }
+@keyframes rise { from { opacity: 0; transform: translateY(-6px); } }
+.fw-label { display: block; font-size: 12px; font-style: italic; opacity: .6; margin-bottom: 2px; }
+.bubble.media-only .fw-label { padding: 6px 10px 0; }
+.m-ed { font-size: 11px; opacity: .75; margin-inline-end: 4px; }
+.m-star { display: inline-grid; margin-inline-end: 3px; }
+.m-star .i { width: 12px; height: 12px; fill: currentColor; }
+.reply-wrap.editing .reply-bar { border-inline-start-style: dashed; }
+.react.more { display: grid; place-items: center; }
+.react.more .i { width: 20px; height: 20px; }
+.attach.on { color: var(--fg); background: var(--bg-3); }
+.emoji-panel {
+  max-width: 860px; margin: 0 auto 8px;
+  border-radius: 20px; background: var(--bg-2); border: 1px solid var(--line);
+  overflow: hidden; animation: rise .3s var(--ease) both;
+}
+.emoji-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 0; }
+.emoji-title { font-size: 13px; font-weight: 600; padding-inline-start: 6px; }
+.emoji-title:empty { display: none; }
+.emoji-tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; }
+.emoji-tabs::-webkit-scrollbar { display: none; }
+.emoji-tab { flex: none; width: 36px; height: 34px; border-radius: 10px; font-size: 18px; opacity: .55; filter: grayscale(1); transition: opacity .2s, background-color .2s, filter .2s; }
+.emoji-tab.on, .emoji-tab:hover { opacity: 1; filter: none; background: var(--bg-3); }
+.emoji-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 2px; padding: 6px 8px 10px; max-height: 230px; overflow-y: auto;
+}
+.emoji { height: 40px; border-radius: 10px; font-size: 24px; line-height: 1; transition: transform .2s var(--spring), background-color .15s; }
+.emoji:hover { background: var(--bg-3); transform: scale(1.12); }
+.emoji:active { transform: scale(.9); }
+.pick-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.pick { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: var(--r); cursor: pointer; transition: background-color .2s; }
+.pick:hover { background: var(--bg-2); }
+.pick input { position: absolute; opacity: 0; pointer-events: none; }
+.pick-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-box { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-2); display: grid; place-items: center; transition: background-color .2s, border-color .2s; }
+.pick input:checked ~ .pick-box { background: var(--ink); border-color: var(--ink); }
+.pick input:checked ~ .pick-box::after { content: ''; width: 9px; height: 5px; border: 2px solid var(--on-ink); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.pick input:focus-visible ~ .pick-box { outline: 2px solid var(--fg); outline-offset: 2px; }
+.star-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.star-item { width: 100%; display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--r); background: var(--bg-2); border: 1px solid var(--line); text-align: start; transition: background-color .2s; }
+.star-item:hover { background: var(--bg-3); }
+.star-top { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.star-chat { color: var(--muted); font-size: 12px; }
+.star-top time { margin-inline-start: auto; color: var(--muted); font-size: 12px; }
+.star-text { font-size: 14px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.star-empty { text-align: center; padding: 18px 8px; }

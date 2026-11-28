@@ -8,6 +8,7 @@ const SHELL = [
   'vendor/qrcode.min.js',
   'config.js',
   'e2e.js',
+  'emoji.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

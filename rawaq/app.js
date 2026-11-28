@@ -12,8 +12,6 @@
     push: { publicKey: '', worker: '' },
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
-  const MAX_VIDEO = 100 * 1024 * 1024;
-  const MAX_IMAGE = 10 * 1024 * 1024;
 
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const ID_LEN = 6;
@@ -57,6 +55,9 @@
     play: '<path d="M8 5.5v13l11-6.5Z" fill="currentColor"/>',
     retry: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/>',
     image: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4.5 17.5 5-5 4 4 2.5-2.5 3.5 3.5"/>',
+    file: '<path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5Z"/><path d="M14 3v5.5h5.5"/>',
+    download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
+    pause: '<rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   };
   const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
@@ -996,7 +997,7 @@
   function wireMsg(m) {
     const o = { t: 'msg', id: m.id, text: m.text, ts: m.ts };
     if (m.re) o.re = { id: m.re.id, text: String(m.re.text || '').slice(0, 300), by: m.re.me ? 's' : 'r' };
-    if (m.media) o.media = { kind: m.media.kind, url: m.media.url, w: m.media.w, h: m.media.h, dur: m.media.dur };
+    if (m.media) o.media = Object.assign({}, m.media);
     return o;
   }
 
@@ -1766,6 +1767,7 @@
       updateTitle();
     }
     if (S.reply && S.reply.id === m.id) cancelReply();
+    if (playing && playing.id === m.id) stopVoice();
     const up = uploads.get(m.id);
     if (up) {
       if (up.xhr) up.xhr.abort();
@@ -1939,6 +1941,15 @@
     }
     const q = e.target.closest('.quote');
     if (q) { jumpTo(q.dataset.ref); return; }
+    const vp = e.target.closest('[data-voice-play]');
+    if (vp) { const m = msgOfRow(vp.closest('.msg')); if (m) toggleVoice(m); return; }
+    if (e.target.closest('[data-voice-speed]')) { cycleSpeed(); return; }
+    const vw = e.target.closest('[data-voice-seek]');
+    if (vw) {
+      const m = msgOfRow(vw.closest('.msg'));
+      if (m) { if (!playing || playing.id !== m.id) toggleVoice(m); else seekVoice(m, vw, e.clientX); }
+      return;
+    }
     const upBtn = e.target.closest('[data-up]');
     if (upBtn) {
       const m = msgOfRow(upBtn.closest('.msg'));
@@ -2083,7 +2094,8 @@
   async function prepareImage(file) {
     const bmp = await loadBitmap(file);
     const { w, h } = sizeOf(bmp);
-    if (file.type === 'image/gif') { if (bmp.close) bmp.close(); return { blob: file, w, h }; }
+    const th = makeThumb(bmp, w, h);
+    if (file.type === 'image/gif') { if (bmp.close) bmp.close(); return { blob: file, w, h, th }; }
     const k = Math.min(1, 2048 / Math.max(w, h));
     const W = Math.max(1, Math.round(w * k));
     const H = Math.max(1, Math.round(h * k));
@@ -2097,20 +2109,49 @@
     g.drawImage(bmp, 0, 0, W, H);
     if (bmp.close) bmp.close();
     const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.86));
-    return { blob: blob || file, w: W, h: H };
+    return { blob: blob || file, w: W, h: H, th };
   }
 
   function probeVideo(file) {
     return new Promise((resolve) => {
       const v = document.createElement('video');
       const url = URL.createObjectURL(file);
-      const done = (info) => { clearTimeout(t); URL.revokeObjectURL(url); resolve(info); };
-      const t = setTimeout(() => done({ w: 0, h: 0, dur: 0 }), 5000);
-      v.preload = 'metadata';
+      let info = { w: 0, h: 0, dur: 0 };
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(t);
+        URL.revokeObjectURL(url);
+        resolve(info);
+      };
+      const t = setTimeout(done, 6000);
+      v.preload = 'auto';
       v.muted = true;
-      v.onloadedmetadata = () => done({ w: v.videoWidth, h: v.videoHeight, dur: Number.isFinite(v.duration) ? v.duration : 0 });
-      v.onerror = () => done({ w: 0, h: 0, dur: 0 });
+      v.playsInline = true;
+      v.onloadedmetadata = () => {
+        info = { w: v.videoWidth, h: v.videoHeight, dur: Number.isFinite(v.duration) ? v.duration : 0 };
+        try { v.currentTime = Math.min(0.5, (info.dur || 1) / 3); } catch (_) { done(); }
+      };
+      v.onseeked = () => {
+        try { info.th = makeThumb(v, info.w, info.h, 72, 0.6); } catch (_) {}
+        done();
+      };
+      v.onerror = done;
       v.src = url;
+    });
+  }
+
+  function probeAudio(file) {
+    return new Promise((resolve) => {
+      const a = document.createElement('audio');
+      const url = URL.createObjectURL(file);
+      const done = (dur) => { clearTimeout(t); URL.revokeObjectURL(url); resolve({ dur }); };
+      const t = setTimeout(() => done(0), 4000);
+      a.preload = 'metadata';
+      a.onloadedmetadata = () => done(Number.isFinite(a.duration) ? a.duration : 0);
+      a.onerror = () => done(0);
+      a.src = url;
     });
   }
 
@@ -2121,22 +2162,52 @@
   const fmtSize = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' ميجا' : Math.max(1, Math.round(b / 1024)) + ' كيلو');
 
   const uploads = new Map();
+  const MAX_FILE = 50 * 1024 * 1024;
   const cloudReady = () => !!(CFG.cloud.uploadPreset && (CFG.cloud.cloudName || CFG.cloud.uploadUrl));
   const uploadUrl = () => CFG.cloud.uploadUrl ||
-    `https://api.cloudinary.com/v1_1/${encodeURIComponent(CFG.cloud.cloudName)}/auto/upload`;
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(CFG.cloud.cloudName)}/raw/upload`;
+
+  const KINDS = ['image', 'video', 'audio', 'file'];
+  const SAFE_INLINE = /^(image\/(jpeg|png|gif|webp|avif)|video\/(mp4|webm|quicktime|ogg)|audio\/(webm|ogg|mp4|mpeg|aac|wav|x-wav|x-m4a|mp3))(;[\w=. -]*)?$/i;
+  const okUrl = (u) => typeof u === 'string' && u.length <= 600 && !/[\s"'<>\\]/.test(u) && CFG.mediaHosts.some((h) => u.startsWith(h));
+  const num = (v, max) => (Number.isFinite(v) && v > 0 && v <= max ? Math.round(v) : 0);
+  const cleanFileName = (s) => String(s || '').replace(CTRL, '').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 
   function cleanMedia(x) {
     if (!x || typeof x !== 'object') return null;
-    const kind = x.kind === 'video' ? 'video' : x.kind === 'image' ? 'image' : null;
-    if (!kind || typeof x.url !== 'string' || x.url.length > 600 || /[\s"'<>\\]/.test(x.url)) return null;
-    if (!CFG.mediaHosts.some((h) => x.url.startsWith(h))) return null;
-    const num = (v, max) => (Number.isFinite(v) && v > 0 && v <= max ? Math.round(v) : 0);
-    return { kind, url: x.url, w: num(x.w, 20000), h: num(x.h, 20000), dur: num(x.dur, 36000) };
+    const kind = KINDS.includes(x.kind) ? x.kind : null;
+    if (!kind) return null;
+    const base = { kind, w: num(x.w, 20000), h: num(x.h, 20000), dur: num(x.dur, 36000) };
+    if (x.v === 2) {
+      if (!Array.isArray(x.parts) || !x.parts.length || x.parts.length > 8 || !x.parts.every(okUrl)) return null;
+      if (typeof x.key !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(x.key)) return null;
+      if (typeof x.iv !== 'string' || !/^[A-Za-z0-9+/]{11}=$/.test(x.iv)) return null;
+      const md = Object.assign(base, { v: 2, parts: x.parts.slice(), key: x.key, iv: x.iv, size: num(x.size, 2 * MAX_FILE) });
+      md.mime = typeof x.mime === 'string' && /^[\w.+-]+\/[\w.+-]+(;[\w=. -]*)?$/.test(x.mime) ? x.mime.slice(0, 80) : 'application/octet-stream';
+      const name = cleanFileName(x.name);
+      if (name) md.name = name;
+      if (typeof x.th === 'string' && x.th.length <= 6000 && /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/]+=*$/.test(x.th)) md.th = x.th;
+      if (typeof x.pk === 'string' && /^[0-9]{8,96}$/.test(x.pk)) md.pk = x.pk;
+      if (kind !== 'file' && !SAFE_INLINE.test(md.mime)) md.kind = 'file';
+      return md;
+    }
+    if (kind !== 'image' && kind !== 'video') return null;
+    if (!okUrl(x.url)) return null;
+    return Object.assign(base, { url: x.url });
   }
+
+  const extOf = (name) => {
+    const m = /\.([a-z0-9]{1,6})$/i.exec(name || '');
+    return m ? m[1].toUpperCase() : '';
+  };
 
   function mediaLabel(m) {
     if (!m.media) return m.text;
-    const label = m.media.kind === 'video' ? '🎥 فيديو' : '📷 صورة';
+    const md = m.media;
+    const label = md.kind === 'video' ? '🎥 فيديو'
+      : md.kind === 'image' ? '📷 صورة'
+        : md.kind === 'audio' ? '🎤 رسالة صوتية' + (md.dur ? ' ' + fmtDur(md.dur) : '')
+          : '📄 ' + (md.name || 'ملف');
     return m.text ? `${label} · ${m.text}` : label;
   }
 
@@ -2151,50 +2222,59 @@
     return cdn(md.url, 'so_0,c_limit,w_900,q_auto').replace(/\.[a-z0-9]+$/i, '.jpg');
   }
 
+  const plain = new Map();
+  const PLAIN_MAX = 40;
+  function mediaUrl(md) {
+    if (!md) return Promise.reject(new Error('none'));
+    if (!md.v) return Promise.resolve(md.kind === 'image' ? cdn(md.url, 'q_auto,f_auto') : md.url);
+    const k = md.parts[0];
+    if (plain.has(k)) {
+      const hit = plain.get(k);
+      plain.delete(k);
+      plain.set(k, hit);
+      return hit;
+    }
+    const p = (async () => {
+      const n = md.parts.length;
+      const chunks = [];
+      for (let i = 0; i < n; i++) {
+        const res = await fetch(md.parts[i], { referrerPolicy: 'no-referrer', credentials: 'omit' });
+        if (!res.ok) throw new Error('fetch ' + res.status);
+        chunks.push(await E.decryptPart(md.key, md.iv, i, n, new Uint8Array(await res.arrayBuffer())));
+      }
+      const type = md.kind === 'file' || !SAFE_INLINE.test(md.mime) ? 'application/octet-stream' : md.mime;
+      return URL.createObjectURL(new Blob(chunks, { type }));
+    })();
+    p.catch(() => { if (plain.get(k) === p) plain.delete(k); });
+    plain.set(k, p);
+    while (plain.size > PLAIN_MAX) {
+      const [old, op] = plain.entries().next().value;
+      plain.delete(old);
+      op.then((u) => setTimeout(() => URL.revokeObjectURL(u), 60000)).catch(() => {});
+    }
+    return p;
+  }
+  function primeMedia(md, url) {
+    if (md && md.v && url) plain.set(md.parts[0], Promise.resolve(url));
+  }
+
+  const lazyIO = 'IntersectionObserver' in window ? new IntersectionObserver((ents) => {
+    for (const ent of ents) {
+      if (!ent.isIntersecting) continue;
+      lazyIO.unobserve(ent.target);
+      const fn = ent.target._load;
+      ent.target._load = null;
+      if (fn) fn();
+    }
+  }, { rootMargin: '600px 0px' }) : null;
+  function whenVisible(node, fn) {
+    if (!lazyIO) { fn(); return; }
+    node._load = fn;
+    lazyIO.observe(node);
+  }
+
   const RING = 2 * Math.PI * 16;
-  function mediaNode(m) {
-    const md = m.media;
-    const up = uploads.get(m.id);
-    const fig = el('div', 'media ' + md.kind);
-    const ratio = md.w && md.h ? Math.min(1.9, Math.max(0.6, md.w / md.h)) : md.kind === 'video' ? 16 / 9 : 4 / 3;
-    fig.style.aspectRatio = String(ratio);
-    const local = up && up.preview;
-    const src = local || (md.url ? thumbUrl(md) : '');
-    if (md.kind === 'image' && src) {
-      const img = el('img');
-      img.alt = 'صورة';
-      img.decoding = 'async';
-      img.loading = 'lazy';
-      img.referrerPolicy = 'no-referrer';
-      img.draggable = false;
-      img.onerror = () => fig.classList.add('broken');
-      img.src = src;
-      fig.appendChild(img);
-    } else if (md.kind === 'video' && local) {
-      const v = el('video');
-      v.muted = true;
-      v.playsInline = true;
-      v.preload = 'metadata';
-      v.src = local + '#t=0.1';
-      fig.appendChild(v);
-    } else if (md.kind === 'video' && src) {
-      const img = el('img');
-      img.alt = 'فيديو';
-      img.loading = 'lazy';
-      img.referrerPolicy = 'no-referrer';
-      img.draggable = false;
-      img.onerror = () => img.remove();
-      img.src = src;
-      fig.appendChild(img);
-    } else if (md.kind === 'image') {
-      fig.classList.add('broken');
-    }
-    if (md.kind === 'video') {
-      const play = el('span', 'play');
-      play.innerHTML = svg('play');
-      fig.appendChild(play);
-      if (md.dur) fig.appendChild(el('span', 'dur', fmtDur(md.dur)));
-    }
+  function uploadOverlay(fig, m, up) {
     if (m.st === 'uploading') {
       const o = el('div', 'up');
       const pct = up ? up.pct || 0 : 0;
@@ -2207,7 +2287,9 @@
       x.innerHTML = '<svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>';
       o.appendChild(x);
       fig.appendChild(o);
-    } else if (m.st === 'failed') {
+      return true;
+    }
+    if (m.st === 'failed') {
       const o = el('div', 'up failed');
       const canRetry = !!(up && up.blob);
       const b = el('button', 'up-btn wide');
@@ -2216,14 +2298,208 @@
       b.innerHTML = svg(canRetry ? 'retry' : 'trash') + `<span>${canRetry ? 'إعادة الرفع' : 'فشل الرفع'}</span>`;
       o.appendChild(b);
       fig.appendChild(o);
-    } else if (md.url) {
+      return true;
+    }
+    return false;
+  }
+
+  function mediaNode(m) {
+    const md = m.media;
+    if (md.kind === 'file') return fileNode(m);
+    if (md.kind === 'audio') return audioNode(m);
+    const up = uploads.get(m.id);
+    const fig = el('div', 'media ' + md.kind);
+    const ratio = md.w && md.h ? Math.min(1.9, Math.max(0.6, md.w / md.h)) : md.kind === 'video' ? 16 / 9 : 4 / 3;
+    fig.style.aspectRatio = String(ratio);
+    const local = up && up.preview;
+    const img = el('img');
+    img.alt = md.kind === 'video' ? 'فيديو' : 'صورة';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.draggable = false;
+    if (md.kind === 'image') {
+      img.onerror = () => fig.classList.add('broken');
+      if (local) img.src = local;
+      else if (md.v) {
+        if (md.th) { img.src = md.th; fig.classList.add('blur'); }
+        whenVisible(fig, () => mediaUrl(md).then((u) => { img.src = u; fig.classList.remove('blur'); }).catch(() => { if (!md.th) fig.classList.add('broken'); }));
+      } else if (md.url) { img.loading = 'lazy'; img.src = thumbUrl(md); } else fig.classList.add('broken');
+      fig.appendChild(img);
+    } else if (local) {
+      const v = el('video');
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = 'metadata';
+      v.src = local + '#t=0.1';
+      fig.appendChild(v);
+    } else {
+      const poster = md.v ? md.th : (md.url ? thumbUrl(md) : '');
+      if (poster) {
+        img.onerror = () => img.remove();
+        if (md.v) fig.classList.add('blur');
+        img.src = poster;
+        fig.appendChild(img);
+      }
+    }
+    if (md.kind === 'video') {
+      const play = el('span', 'play');
+      play.innerHTML = svg('play');
+      fig.appendChild(play);
+      if (md.dur) fig.appendChild(el('span', 'dur', fmtDur(md.dur)));
+    }
+    if (!uploadOverlay(fig, m, up) && (md.url || md.v)) {
       fig.dataset.view = '1';
       fig.setAttribute('role', 'button');
       fig.tabIndex = 0;
       fig.setAttribute('aria-label', md.kind === 'video' ? 'تشغيل الفيديو' : 'عرض الصورة');
     }
-    if (md.kind === 'image' && !src) fig.insertAdjacentHTML('beforeend', svg('image'));
+    if (md.kind === 'image' && !local && !md.th && !md.url && !md.v) fig.insertAdjacentHTML('beforeend', svg('image'));
     return fig;
+  }
+
+  function fileNode(m) {
+    const md = m.media;
+    const up = uploads.get(m.id);
+    const card = el('div', 'media file-card');
+    const ic = el('span', 'file-ic');
+    ic.innerHTML = svg('file');
+    const ext = extOf(md.name);
+    if (ext) ic.appendChild(el('em', null, ext));
+    const info = el('span', 'file-info');
+    const nm = el('b', 'file-name', md.name || 'ملف');
+    nm.dir = 'auto';
+    info.append(nm, el('span', 'file-meta', [md.size ? fmtSize(md.size) : '', 'مشفّر'].filter(Boolean).join(' · ')));
+    card.append(ic, info);
+    if (!uploadOverlay(card, m, up) && md.v) {
+      card.dataset.view = '1';
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.setAttribute('aria-label', 'تنزيل ' + (md.name || 'الملف'));
+      const dl = el('span', 'file-dl');
+      dl.innerHTML = svg('download');
+      card.appendChild(dl);
+    }
+    return card;
+  }
+
+  const player = new Audio();
+  player.preload = 'auto';
+  let playing = null;
+  let speed = Number(store.get('speed', 1)) || 1;
+  const BARS = 40;
+  function peaksOf(md) {
+    const raw = md.pk || '';
+    const out = [];
+    for (let i = 0; i < BARS; i++) {
+      const v = raw ? Number(raw[Math.floor(i * raw.length / BARS)]) : 3 + ((i * 7) % 5);
+      out.push(Math.max(1, Math.min(9, v)));
+    }
+    return out;
+  }
+  function audioNode(m) {
+    const md = m.media;
+    const up = uploads.get(m.id);
+    const card = el('div', 'media voice');
+    card.dataset.voice = m.id;
+    const btn = el('button', 'v-play');
+    btn.type = 'button';
+    btn.dataset.voicePlay = '1';
+    btn.setAttribute('aria-label', 'تشغيل');
+    btn.innerHTML = svg('play') + svg('pause');
+    const wave = el('span', 'v-wave');
+    wave.dataset.voiceSeek = '1';
+    for (const v of peaksOf(md)) {
+      const bar = el('i');
+      bar.style.setProperty('--h', String(v / 9));
+      wave.appendChild(bar);
+    }
+    const meta = el('span', 'v-meta');
+    const t = el('span', 'v-time', fmtDur(md.dur));
+    const sp = el('button', 'v-speed', speed + '×');
+    sp.type = 'button';
+    sp.dataset.voiceSpeed = '1';
+    sp.setAttribute('aria-label', 'سرعة التشغيل');
+    meta.append(t, sp);
+    card.append(btn, wave, meta);
+    if (playing && playing.id === m.id) card.classList.add('playing');
+    if (!uploadOverlay(card, m, up) && !md.v && !(up && up.preview)) card.classList.add('broken');
+    return card;
+  }
+  function voiceRow(mid) {
+    return box.querySelector(`.media.voice[data-voice="${CSS.escape(mid)}"]`);
+  }
+  function paintVoice() {
+    if (!playing) return;
+    const card = voiceRow(playing.id);
+    if (!card) return;
+    const bars = card.querySelectorAll('.v-wave i');
+    const d0 = player.duration && Number.isFinite(player.duration) ? player.duration : playing.m.media.dur || 1;
+    const on = Math.round(Math.min(1, (player.currentTime || 0) / d0) * bars.length);
+    bars.forEach((b, i) => b.classList.toggle('on', i < on));
+    const d = player.duration && Number.isFinite(player.duration) ? player.duration : playing.m.media.dur || 1;
+    const p = Math.min(1, (player.currentTime || 0) / d);
+    card.style.setProperty('--p', String(p));
+    $('.v-time', card).textContent = fmtDur(player.currentTime || 0);
+  }
+  function stopVoice() {
+    if (!playing) return;
+    const card = voiceRow(playing.id);
+    if (card) {
+      card.classList.remove('playing', 'loading');
+      card.style.removeProperty('--p');
+      card.querySelectorAll('.v-wave i.on').forEach((b) => b.classList.remove('on'));
+      $('.v-time', card).textContent = fmtDur(playing.m.media.dur);
+    }
+    player.pause();
+    playing = null;
+  }
+  async function toggleVoice(m) {
+    if (playing && playing.id === m.id) {
+      const card = voiceRow(m.id);
+      if (player.paused) { player.play().catch(() => {}); if (card) card.classList.add('playing'); }
+      else { player.pause(); if (card) card.classList.remove('playing'); }
+      return;
+    }
+    stopVoice();
+    playing = { id: m.id, m };
+    const card = voiceRow(m.id);
+    if (card) card.classList.add('loading', 'playing');
+    try {
+      const up = uploads.get(m.id);
+      const url = up && up.preview ? up.preview : await mediaUrl(m.media);
+      if (!playing || playing.id !== m.id) return;
+      player.src = url;
+      player.playbackRate = speed;
+      await player.play();
+      const c2 = voiceRow(m.id);
+      if (c2) c2.classList.remove('loading');
+    } catch (_) {
+      stopVoice();
+      toast('ما قدرنا نشغّل الرسالة الصوتية', { icon: 'alert' });
+    }
+  }
+  player.addEventListener('timeupdate', paintVoice);
+  player.addEventListener('ended', () => {
+    const cur = playing;
+    stopVoice();
+    if (!cur || !S.active) return;
+    const list = msgsOf(S.active);
+    const i = list.findIndex((x) => x.id === cur.id);
+    const next = list.slice(i + 1).find((x) => x.media && x.media.kind === 'audio');
+    if (next && list[i + 1] === next && next.me === cur.m.me) toggleVoice(next);
+  });
+  function cycleSpeed() {
+    speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
+    store.set('speed', speed);
+    player.playbackRate = speed;
+    $$('.v-speed', box).forEach((b) => { b.textContent = speed + '×'; });
+  }
+  function seekVoice(m, wave, x) {
+    if (!playing || playing.id !== m.id) return;
+    const r = wave.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (r.right - x) / r.width));
+    const d = player.duration && Number.isFinite(player.duration) ? player.duration : m.media.dur;
+    if (d) { player.currentTime = frac * d; paintVoice(); }
   }
 
   function paintProgress(mid, pct) {
@@ -2231,28 +2507,47 @@
     if (bar) bar.setAttribute('stroke-dashoffset', String(RING * (1 - pct)));
   }
 
+  function makeThumb(src, w, h, max = 56, q = 0.6) {
+    if (!w || !h) return '';
+    const k = Math.min(1, max / Math.max(w, h));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(w * k));
+    cv.height = Math.max(1, Math.round(h * k));
+    const g = cv.getContext('2d');
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(src, 0, 0, cv.width, cv.height);
+    let out = cv.toDataURL('image/jpeg', q);
+    if (out.length > 6000) out = cv.toDataURL('image/jpeg', 0.3);
+    return out.length <= 6000 ? out : '';
+  }
+
   let pendingFile = null;
   async function pickMedia(file) {
     const id = S.active;
     if (!file || !id || isBlocked(id)) return;
     if (!cloudReady()) {
-      toast('رفع الوسائط غير متاح', { icon: 'alert' });
+      toast('رفع الملفات غير متاح', { icon: 'alert' });
       return;
     }
-    const kind = /^video\//.test(file.type) ? 'video' : /^image\//.test(file.type) ? 'image' : null;
-    if (!kind) { toast('تقدر ترسل صور وفيديوهات فقط', { icon: 'alert' }); return; }
-    if (kind === 'video' && file.size > MAX_VIDEO) { toast('الفيديو أكبر من 100 ميجا', { icon: 'alert' }); return; }
-    if (kind === 'image' && file.size > 4 * MAX_IMAGE) { toast('الصورة كبيرة جداً', { icon: 'alert' }); return; }
-    let prep;
+    if (file.size > MAX_FILE) { toast('الملف أكبر من 50 ميجا', { icon: 'alert' }); return; }
+    if (!file.size) { toast('الملف فاضي', { icon: 'alert' }); return; }
+    let kind = /^video\//.test(file.type) ? 'video'
+      : /^image\/(jpeg|png|gif|webp|avif|bmp)$/i.test(file.type) ? 'image'
+        : /^audio\//.test(file.type) && SAFE_INLINE.test(file.type) ? 'audio' : 'file';
+    let prep = null;
     try {
-      prep = kind === 'image' ? await prepareImage(file) : Object.assign({ blob: file }, await probeVideo(file));
-    } catch (_) {
-      toast('ما قدرنا نقرأ الملف', { icon: 'alert' });
-      return;
-    }
-    if (kind === 'image' && prep.blob.size > MAX_IMAGE) { toast('الصورة أكبر من 10 ميجا', { icon: 'alert' }); return; }
+      if (kind === 'image') prep = await prepareImage(file);
+      else if (kind === 'video') {
+        prep = Object.assign({ blob: file }, await probeVideo(file));
+        if (!prep.w && !prep.dur) kind = 'file';
+      } else if (kind === 'audio') prep = Object.assign({ blob: file }, await probeAudio(file));
+    } catch (_) { prep = null; }
+    if (!prep) { kind = 'file'; prep = { blob: file }; }
+    if (kind === 'file') prep = { blob: file };
     if (S.active !== id) return;
-    pendingFile = Object.assign({ kind, chat: id, preview: URL.createObjectURL(prep.blob) }, prep);
+    const mime = (kind === 'image' ? prep.blob.type : file.type) || 'application/octet-stream';
+    pendingFile = Object.assign({ kind, chat: id, name: cleanFileName(file.name), mime, preview: kind === 'file' ? null : URL.createObjectURL(prep.blob) }, prep);
 
     const pv = $('#media-preview');
     pv.textContent = '';
@@ -2261,36 +2556,47 @@
       img.alt = '';
       img.src = pendingFile.preview;
       pv.appendChild(img);
-    } else {
+    } else if (kind === 'video') {
       const v = el('video');
       v.src = pendingFile.preview;
       v.controls = true;
       v.playsInline = true;
       v.muted = true;
       pv.appendChild(v);
+    } else if (kind === 'audio') {
+      const a = el('audio');
+      a.src = pendingFile.preview;
+      a.controls = true;
+      pv.appendChild(a);
+    } else {
+      pv.appendChild(fileNode({ id: '', st: 'pending', media: { kind: 'file', name: pendingFile.name, size: file.size } }));
     }
-    const bits = [kind === 'image' ? 'صورة' : 'فيديو', fmtSize(prep.blob.size)];
+    const label = { image: 'صورة', video: 'فيديو', audio: 'صوت', file: extOf(pendingFile.name) || 'ملف' }[kind];
+    const bits = [label, fmtSize(prep.blob.size)];
     if (prep.w && prep.h) bits.push(`${prep.w}×${prep.h}`);
     if (prep.dur) bits.push(fmtDur(prep.dur));
+    bits.push('يتشفّر قبل الرفع');
     $('#media-info').textContent = bits.join(' · ');
     $('#in-caption').value = input.value.trim();
     openModal('m-media', isTouch ? null : '#in-caption');
     openM._onClose = () => {
-      if (pendingFile) { URL.revokeObjectURL(pendingFile.preview); pendingFile = null; }
-      const vid = $('#media-preview video');
+      if (pendingFile) { if (pendingFile.preview) URL.revokeObjectURL(pendingFile.preview); pendingFile = null; }
+      const vid = $('#media-preview video, #media-preview audio');
       if (vid) vid.pause();
     };
   }
 
-  function sendMedia(pf, caption) {
+  function sendMedia(pf, caption, extra) {
     const id = pf.chat;
     if (!S.contacts[id] || isBlocked(id)) return;
     const c = ensureContact(id);
-    const m = {
-      id: msgId(), me: true, text: cleanText(caption).trim(), ts: Date.now(), st: 'uploading',
-      media: { kind: pf.kind, w: pf.w || 0, h: pf.h || 0, dur: Math.round(pf.dur || 0) },
-    };
+    const media = { kind: pf.kind, w: pf.w || 0, h: pf.h || 0, dur: Math.round(pf.dur || 0), mime: pf.mime, size: pf.blob.size };
+    if (pf.name && pf.kind === 'file') media.name = pf.name;
+    if (pf.th) media.th = pf.th;
+    if (pf.pk) media.pk = pf.pk;
+    const m = { id: msgId(), me: true, text: cleanText(caption).trim(), ts: Date.now(), st: 'uploading', media };
     if (S.reply && S.active === id) { m.re = S.reply; cancelReply(); }
+    if (extra) Object.assign(m, extra);
     uploads.set(m.id, { blob: pf.blob, preview: pf.preview, kind: pf.kind, pct: 0 });
     const list = msgsOf(id);
     list.push(m);
@@ -2306,66 +2612,71 @@
   }
 
   const randomName = () => rand(24, 'abcdefghijkmnopqrstuvwxyz23456789');
-  function startUpload(cid, m, attempt = 0) {
+  function uploadPart(bytes, up, onProgress, attempt = 0) {
+    return new Promise((resolve) => {
+      const fd = new FormData();
+      const pid = randomName();
+      fd.append('file', new Blob([bytes], { type: 'application/octet-stream' }), pid + '.bin');
+      fd.append('upload_preset', CFG.cloud.uploadPreset);
+      if (attempt < 1) fd.append('public_id', pid + '.bin');
+      const xhr = new XMLHttpRequest();
+      up.xhr = xhr;
+      xhr.open('POST', uploadUrl());
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress((e.loaded / e.total) * bytes.length); };
+      xhr.onerror = () => resolve(null);
+      xhr.onabort = () => resolve(null);
+      xhr.onload = () => {
+        let res = null;
+        try { res = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300 && res && res.secure_url && res.existing !== true && okUrl(res.secure_url)) { resolve(res.secure_url); return; }
+        const retry = (xhr.status === 400 && res && res.error && /public.?id/i.test(String(res.error.message))) || (res && res.existing === true);
+        if (attempt < 1 && retry) { uploadPart(bytes, up, onProgress, attempt + 1).then(resolve); return; }
+        resolve(null);
+      };
+      xhr.send(fd);
+    });
+  }
+
+  function uploadFailed(cid, m, up) {
+    up.xhr = null;
+    if (!uploads.has(m.id)) return;
+    m.st = 'failed';
+    saveMsgs(cid);
+    if (S.active === cid) refreshRow(m);
+    toast('فشل الرفع', { icon: 'alert' });
+  }
+
+  async function startUpload(cid, m) {
     const up = uploads.get(m.id);
     if (!up || !up.blob) return;
-    const fd = new FormData();
-    const pid = randomName();
-    const ext = up.kind === 'image' ? 'jpg' : ((up.blob.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
-    fd.append('file', up.blob, `${pid}.${ext}`);
-    fd.append('upload_preset', CFG.cloud.uploadPreset);
-    if (attempt < 2) fd.append('public_id', pid);
-    const xhr = new XMLHttpRequest();
-    up.xhr = xhr;
-    up.pct = 0;
-    xhr.open('POST', uploadUrl());
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
-      up.pct = e.loaded / e.total;
-      if (S.active === cid) paintProgress(m.id, up.pct);
-    };
-    const fail = (why) => {
-      up.xhr = null;
-      if (!uploads.has(m.id)) return;
-      m.st = 'failed';
-      saveMsgs(cid);
-      if (S.active === cid) refreshRow(m);
-      toast('فشل الرفع', { icon: 'alert' });
-    };
-    xhr.onerror = () => fail('');
-    xhr.onload = () => {
-      let res = null;
-      try { res = JSON.parse(xhr.responseText); } catch (_) {}
-      if (xhr.status < 200 || xhr.status >= 300 || !res || !res.secure_url) {
-        if (attempt < 2 && xhr.status === 400 && res && res.error && /public.?id/i.test(String(res.error.message))) {
-          up.xhr = null;
-          startUpload(cid, m, 2);
-          return;
-        }
-        fail(res && res.error && res.error.message ? String(res.error.message).slice(0, 80) : '');
-        return;
-      }
-      if (res.existing === true) {
-        up.xhr = null;
-        if (attempt < 2) { startUpload(cid, m, attempt + 1); return; }
-        fail('');
-        return;
-      }
-      const media = cleanMedia({
-        kind: m.media.kind, url: res.secure_url,
-        w: res.width || m.media.w, h: res.height || m.media.h, dur: res.duration || m.media.dur,
-      });
-      if (!media) { fail(''); return; }
-      up.xhr = null;
-      up.blob = null;
-      m.media = media;
-      m.st = 'pending';
-      saveMsgs(cid);
-      if (S.active === cid) { refreshRow(m); renderBanner(); }
-      dispatch(cid, m);
-    };
-    xhr.send(fd);
     m.st = 'uploading';
+    up.pct = 0;
+    let enc;
+    try { enc = await E.encryptFile(await up.blob.arrayBuffer()); } catch (_) { uploadFailed(cid, m, up); return; }
+    const total = enc.parts.reduce((n, p) => n + p.length, 0);
+    let done = 0;
+    const urls = [];
+    for (const part of enc.parts) {
+      if (!uploads.has(m.id)) return;
+      const url = await uploadPart(part, up, (loaded) => {
+        up.pct = (done + loaded) / total;
+        if (S.active === cid) paintProgress(m.id, up.pct);
+      });
+      if (!uploads.has(m.id)) return;
+      if (!url) { uploadFailed(cid, m, up); return; }
+      urls.push(url);
+      done += part.length;
+    }
+    const media = cleanMedia(Object.assign({}, m.media, { v: 2, parts: urls, key: enc.key, iv: enc.iv }));
+    if (!media) { uploadFailed(cid, m, up); return; }
+    if (up.preview) primeMedia(media, up.preview);
+    up.xhr = null;
+    up.blob = null;
+    m.media = media;
+    m.st = 'pending';
+    saveMsgs(cid);
+    if (S.active === cid) { refreshRow(m); renderBanner(); }
+    dispatch(cid, m);
   }
 
   function retryUpload(m) {
@@ -2376,27 +2687,58 @@
     startUpload(S.active, m);
   }
 
+  async function downloadFile(m) {
+    const md = m.media;
+    const card = box.querySelector(`.msg[data-id="${CSS.escape(m.id)}"] .file-card`);
+    if (card) card.classList.add('loading');
+    try {
+      const url = await mediaUrl(md);
+      const a = el('a');
+      a.href = url;
+      a.download = md.name || 'file';
+      a.rel = 'noopener';
+      a.hidden = true;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 4000);
+    } catch (_) {
+      toast('ما قدرنا نفك تشفير الملف', { icon: 'alert' });
+    } finally {
+      if (card) card.classList.remove('loading');
+    }
+  }
+
   const viewer = $('#viewer');
+  let viewing = 0;
   function openViewer(m) {
     const md = m.media;
-    if (!md || !md.url) return;
+    if (!md) return;
+    if (md.kind === 'file') { downloadFile(m); return; }
+    if (md.kind === 'audio') { toggleVoice(m); return; }
+    if (!md.url && !md.v) return;
+    const run = ++viewing;
     const stage = $('#viewer-stage');
     stage.textContent = '';
+    stage.classList.add('loading');
+    const up = uploads.get(m.id);
+    const src = up && up.preview ? Promise.resolve(up.preview) : mediaUrl(md);
     if (md.kind === 'image') {
       const img = el('img');
       img.alt = m.text || 'صورة';
       img.referrerPolicy = 'no-referrer';
       img.draggable = false;
-      img.src = cdn(md.url, 'q_auto,f_auto');
+      if (md.th) img.src = md.th;
       stage.appendChild(img);
+      src.then((u) => { if (run === viewing) { img.src = u; stage.classList.remove('loading'); } }).catch(() => { if (run === viewing) toast('ما قدرنا نعرض الصورة', { icon: 'alert' }); });
     } else {
       const v = el('video');
       v.controls = true;
       v.autoplay = true;
       v.playsInline = true;
       v.setAttribute('controlsList', 'nodownload');
-      v.src = md.url;
+      if (md.th) v.poster = md.th;
       stage.appendChild(v);
+      src.then((u) => { if (run === viewing) { v.src = u; stage.classList.remove('loading'); } }).catch(() => { if (run === viewing) toast('ما قدرنا نشغّل الفيديو', { icon: 'alert' }); });
     }
     $('#viewer-caption').textContent = m.text || '';
     viewer.hidden = false;
@@ -3143,7 +3485,7 @@
 
     $('#btn-attach').addEventListener('click', () => {
       if (!cloudReady()) {
-        toast('رفع الوسائط غير متاح', { icon: 'alert' });
+        toast('رفع الملفات غير متاح', { icon: 'alert' });
         return;
       }
       $('#in-media').click();
@@ -3170,7 +3512,7 @@
     });
     input.addEventListener('paste', (e) => {
       const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
-      const item = items.find((it) => it.kind === 'file' && /^(image|video)\//.test(it.type));
+      const item = items.find((it) => it.kind === 'file');
       if (!item) return;
       e.preventDefault();
       pickMedia(item.getAsFile());

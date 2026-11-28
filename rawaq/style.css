@@ -1,10 +1,4 @@
-/* ==========================================================================
-   رواق — Rawaq
-   Classic black and white, dark mode only. Every color is a token.
-   ========================================================================== */
-
 :root {
-  /* black and white only, dark mode only */
   --bg: #000000;
   --bg-2: #0e0e0e;
   --bg-3: #1a1a1a;
@@ -42,13 +36,11 @@
   color-scheme: dark;
 }
 
-/* ---------- base ---------- */
-
 *, *::before, *::after { box-sizing: border-box; }
 html {
   -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
-  touch-action: manipulation;   /* no double-tap zoom */
-  overscroll-behavior: none;    /* no rubber-band or pull-to-refresh on the page itself */
+  touch-action: manipulation;
+  overscroll-behavior: none;
 }
 html, body { height: 100%; }
 body {
@@ -89,7 +81,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-/* ---------- scrollbars: thin, rounded, monochrome ---------- */
 
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
@@ -103,7 +94,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 ::-webkit-scrollbar-thumb:hover { border-width: 3px; background-color: var(--thumb-hover); }
 ::-webkit-scrollbar-thumb:active { background-color: var(--fg); }
 ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
-/* Firefox */
 @supports (-moz-appearance: none) {
   * { scrollbar-width: thin; scrollbar-color: var(--thumb) transparent; }
 }
@@ -111,8 +101,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .mono { font-family: var(--font-mono); letter-spacing: .12em; font-weight: 600; }
 .muted { color: var(--muted); }
 .noscript { padding: 40px; text-align: center; }
-
-/* ---------- app shell & views ---------- */
 
 .app {
   position: fixed;
@@ -145,7 +133,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .welcome { width: min(100%, 380px); text-align: center; }
 
-/* staggered entrance for any .reveal children */
 .reveal > * { opacity: 0; }
 .view.on .reveal > * {
   animation: rise .9s var(--ease) both;
@@ -156,7 +143,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   to { opacity: 1; transform: none; filter: none; }
 }
 
-/* the arch mark, drawn stroke by stroke */
 .mark {
   width: 64px; height: 64px; margin: 0 auto 20px;
   fill: none; stroke: var(--fg); stroke-width: 2.6;
@@ -189,8 +175,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .stack { display: grid; gap: 12px; }
 .row { display: flex; gap: 10px; justify-content: center; }
 .row > .btn { flex: 1; }
-
-/* ---------- inputs & buttons ---------- */
 
 .input {
   width: 100%;
@@ -259,8 +243,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .icon-btn.ghost { border-color: transparent; background: transparent; }
 .icon-btn.ghost:hover { background: var(--bg-2); }
 
-/* ---------- avatars ---------- */
-
 .avatar {
   --s: 50px;
   position: relative;
@@ -294,8 +276,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .avatar-btn { border-radius: 50%; transition: transform .25s var(--ease); }
 .avatar-btn:active { transform: scale(.92); }
 
-/* ---------- ID reveal ---------- */
-
 .id-code {
   display: flex; justify-content: center; gap: clamp(5px, 2vw, 9px);
   margin: 28px 0 22px;
@@ -323,8 +303,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 #v-id .row { margin-bottom: 12px; margin-top: 26px; }
 
-/* ---------- main layout ---------- */
-
 .main { display: block; }
 .sidebar, .chat {
   position: absolute;
@@ -345,7 +323,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .main.chat-open .chat { transform: none; box-shadow: 0 0 60px rgba(0, 0, 0, .6); }
 .main.chat-open .sidebar { transform: translateX(22%); opacity: .35; }
 
-/* sidebar */
 .side-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: calc(16px + var(--safe-t)) 20px 12px;
@@ -373,7 +350,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .net[data-state="connecting"] i, .net[data-state="idle"] i { animation: blink 1.2s ease-in-out infinite; background: var(--muted); }
 @keyframes blink { 50% { opacity: .2; } }
 .head-actions { display: flex; align-items: center; gap: 8px; }
-
 
 .me-card {
   margin: 6px 16px 4px;
@@ -408,7 +384,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .search input {
   flex: 1; min-width: 0; height: 100%;
   border: 0; outline: 0; background: transparent;
-  font-size: 16px; color: var(--fg); /* 16px+ stops iOS zooming into focused fields */
+  font-size: 16px; color: var(--fg);
 }
 .search input::placeholder { color: var(--faint); }
 .search input::-webkit-search-cancel-button { display: none; }
@@ -484,7 +460,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .fab .i { width: 22px; height: 22px; transition: transform .45s var(--ease); }
 .fab:hover .i { transform: rotate(90deg); }
 
-/* chat */
 .chat-empty {
   margin: auto; text-align: center; color: var(--muted); padding: 24px;
 }
@@ -606,7 +581,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .tick .i { width: 15px; height: 15px; stroke-width: 2; }
 .tick.read { opacity: 1; }
 .tick.pop .i { animation: pop .4s var(--spring); }
-/* quoted reply inside a bubble */
 .quote {
   display: grid; gap: 1px;
   width: 100%;
@@ -623,7 +597,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .quote b { font-weight: 600; font-size: 12.5px; }
 .quote span { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* reactions */
 .msg.has-rx { margin-bottom: 18px; }
 .rx {
   position: absolute;
@@ -641,7 +614,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .msg.me .rx { inset-inline-end: auto; inset-inline-start: 10px; }
 .rx.pop { animation: pop .45s var(--spring) both; }
 
-/* hover tools (mouse) */
 .msg { position: relative; align-items: center; gap: 6px; touch-action: pan-y; }
 .msg.them { flex-direction: row; }
 .msg-tools {
@@ -664,7 +636,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 @media (hover: none) { .msg-tools { display: none; } }
 
-/* swipe-to-reply */
 .msg { transition: transform .45s var(--spring); }
 .msg.swiping { transition: none; }
 .swipe-hint {
@@ -682,7 +653,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .swipe-hint .i { width: 16px; height: 16px; }
 
 .msg .bubble { transition: background-color .5s var(--ease), color .5s var(--ease), transform .5s var(--spring), filter .4s var(--ease), box-shadow .3s; }
-/* finger resting on a bubble: it sinks in gently over the long-press time */
 .msg.pressing .bubble {
   transform: scale(.95) translateY(2px);
   filter: brightness(.93);
@@ -836,8 +806,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   46% { transform: translateY(14px); opacity: 0; }
   100% { transform: none; opacity: 1; }
 }
-
-/* ---------- modals ---------- */
 
 .modal {
   position: fixed; inset: 0; z-index: 40;
@@ -1055,7 +1023,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .ctx-list button:hover, .ctx-list button:focus-visible { background: var(--bg-2); outline: none; }
 .ctx-list .i { width: 18px; height: 18px; color: var(--muted); }
 
-/* attach + blocked bar + drop zone */
 .attach {
   width: 40px; height: 40px; flex: none;
   border-radius: 50%;
@@ -1098,7 +1065,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .drop-zone div { display: grid; justify-items: center; gap: 8px; font-size: 15px; }
 .drop-zone .i { width: 34px; height: 34px; }
 
-/* media inside bubbles */
 .bubble.has-media { padding: 4px 4px 8px; width: min(78vw, 300px); }
 .bubble.has-media .quote { width: auto; margin: 2px 2px 6px; }
 .bubble.has-media .text { padding: 4px 10px 0; }
@@ -1176,7 +1142,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .msg.them .bubble.media-only .meta { left: 12px; }
 .tick.failed { color: inherit; }
 
-/* media preview sheet */
 .media-preview {
   display: grid; place-items: center;
   max-height: 46vh;
@@ -1189,7 +1154,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .send-lg { width: 50px; height: 50px; }
 .media-note { margin-top: 0; justify-content: flex-start; text-align: start; }
 
-/* blocked list */
 .blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .blocked-item {
   display: flex; align-items: center; gap: 12px;
@@ -1204,7 +1168,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .blocked-item .btn { height: 38px; font-size: 13.5px; padding: 0 12px; border-radius: 12px; }
 .blocked-empty { text-align: center; padding: 10px 0 4px; }
 
-/* full-screen viewer */
 .viewer {
   position: fixed; inset: 0; z-index: 70;
   background: rgba(0, 0, 0, .94);
@@ -1214,7 +1177,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .viewer.open { opacity: 1; }
 .viewer-stage { position: absolute; inset: 0; display: grid; place-items: center; padding: calc(64px + var(--safe-t)) 12px calc(24px + var(--safe-b)); }
-/* fit inside the visible screen whatever the photo's shape (tall screenshots included) */
 .viewer-stage img, .viewer-stage video {
   display: block;
   width: auto; height: auto;
@@ -1254,8 +1216,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .notif-card .btn { height: 38px; padding: 0 14px; font-size: 14px; border-radius: 12px; }
 .notif-card .icon-btn { width: 34px; height: 34px; }
 
-/* ---------- verified badge ---------- */
-
 .vslot { display: inline-flex; align-items: center; flex: none; vertical-align: middle; }
 .vslot:empty { display: none; }
 .vbadge {
@@ -1283,7 +1243,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .head-open { cursor: pointer; border-radius: 12px; transition: opacity .2s; }
 .chat-who.head-open:hover b { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 4px; }
 
-/* the card that rises out of a tapped badge */
 .vpop { position: fixed; inset: 0; z-index: 75; }
 .vpop-backdrop {
   position: absolute; inset: 0;
@@ -1346,8 +1305,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   100% { opacity: 0; transform: rotate(var(--a)) translateY(-46px) scale(1); }
 }
 .vpop-card .btn { height: 46px; margin-top: 4px; }
-
-/* ---------- profile panel (opens from the chat header) ---------- */
 
 .profile { position: absolute; inset: 0; z-index: 5; }
 .pf-bg {
@@ -1414,8 +1371,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .pf-v .vbadge-svg { width: 20px; height: 20px; }
 .chat-head.under-profile { visibility: hidden; transition: visibility 0s .05s; }
 
-/* ---------- toasts ---------- */
-
 .toasts {
   position: fixed; z-index: 60;
   top: calc(14px + var(--safe-t));
@@ -1443,8 +1398,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-16px) scale(.92); } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-10px) scale(.96); } }
 
-/* ---------- larger screens ---------- */
-
 @media (min-width: 600px) {
   .modal { align-items: center; padding: 24px; }
   .sheet {
@@ -1459,7 +1412,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 
 @media (min-width: 900px) {
-  /* each column is exactly the viewport tall and scrolls on its own */
   .main {
     display: grid;
     grid-template-columns: 380px minmax(0, 1fr);
@@ -1482,10 +1434,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .banner { margin-inline: 24px; }
 }
 
-/* ---------- touch screens ---------- */
-
 @media (hover: none) {
-  /* hover styles stick after a tap on touch screens; keep only the pressed states */
   .item:hover:not(.selected) { background: transparent; }
   .icon-btn:hover { background: var(--bg); }
   .icon-btn.ghost:hover, .search-x:hover, .attach:hover { background: transparent; }
@@ -1509,7 +1458,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .react { width: 38px; height: 38px; font-size: 23px; }
 }
 
-/* very small phones */
 @media (max-width: 360px) {
   .side-head { padding-inline: 14px; }
   .me-card { margin-inline: 12px; }
@@ -1519,15 +1467,12 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .pf-actions { gap: 8px; padding: 0 14px; }
 }
 
-/* short landscape screens */
 @media (max-height: 500px) and (orientation: landscape) {
   .wordmark { font-size: 48px; }
   .tagline { margin-bottom: 18px; }
   .mark { width: 44px; height: 44px; margin-bottom: 8px; }
   .pf-avatar { --s: 80px; }
 }
-
-/* ---------- reduced motion ---------- */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

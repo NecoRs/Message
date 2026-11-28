@@ -1,4 +1,3 @@
-/* رواق — service worker: offline app shell + notification clicks. */
 const CACHE = 'rawaq-v9';
 const SHELL = [
   './',
@@ -27,8 +26,6 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Same-origin: network first (so updates show up), cache when offline or slow.
-// Fonts: cache first. Everything else (signalling server) is left alone.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -56,20 +53,18 @@ self.addEventListener('fetch', (e) => {
     try {
       const res = await Promise.race([fromNet, slow]);
       if (res) return res;
-    } catch (_) { /* offline */ }
+    } catch (_) {}
     const hit = await cache.match(req, { ignoreSearch: true }) ||
       (req.mode === 'navigate' ? await cache.match('index.html') : null);
     return hit || fromNet;
   })());
 });
 
-// Web Push from the push worker. It carries no content: the message itself
-// waits encrypted in the mailbox and is fetched when the app opens.
 self.addEventListener('push', (e) => {
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (wins.some((w) => w.visibilityState === 'visible' && w.focused)) return; // the open app shows it itself
-    await self.registration.showNotification('رواق', {
+    if (wins.some((w) => w.visibilityState === 'visible' && w.focused)) return;
+    await self.registration.showNotification('همس', {
       body: 'وصلتك رسالة جديدة',
       icon: 'icons/icon-192.png',
       badge: 'icons/icon-192.png',

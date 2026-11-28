@@ -1,36 +1,26 @@
-/*
- * رواق — Rawaq
- * Private, peer-to-peer messaging. Each person gets a short ID; messages travel
- * directly between browsers over an encrypted WebRTC data channel (PeerJS),
- * and are stored only on the two devices.
- */
 (() => {
   'use strict';
 
-  // ---------------------------------------------------------------- config
-
   const CFG = Object.assign({
-    prefix: 'rawaq-',      // namespace on the shared PeerJS signalling server
-    peer: {},              // extra PeerJS options (host, port, path, secure, config…)
-    dialTimeout: 12000,    // give up on a connection attempt after this long
-    probeEvery: 30000,     // how often to check whether contacts came online
-    mediaHosts: ['https://res.cloudinary.com/'], // only media links from these are shown
-    verified: ['QXYWNW'],  // IDs that get the verified badge
-    db: { url: '' },       // Firebase Realtime Database URL: offline delivery mailbox
-    push: { publicKey: '', worker: '' }, // Web Push: VAPID public key + Cloudflare Worker URL
+    prefix: 'rawaq-',
+    peer: {},
+    dialTimeout: 12000,
+    probeEvery: 30000,
+    mediaHosts: ['https://res.cloudinary.com/'],
+    verified: ['QXYWNW'],
+    db: { url: '' },
+    push: { publicKey: '', worker: '' },
   }, window.RAWAQ_CONFIG || {});
   CFG.cloud = Object.assign({ cloudName: '', uploadPreset: '', uploadUrl: '' }, CFG.cloud || {});
-  const MAX_VIDEO = 100 * 1024 * 1024; // Cloudinary free plan limit
+  const MAX_VIDEO = 100 * 1024 * 1024;
   const MAX_IMAGE = 10 * 1024 * 1024;
 
-  const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
+  const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const ID_LEN = 6;
   const MAX_TEXT = 2000;
   const MAX_NAME = 30;
-  const KEEP = 800;          // messages kept per conversation
+  const KEEP = 800;
   const GROUP_GAP = 3 * 60 * 1000;
-
-  // ---------------------------------------------------------------- utils
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -72,8 +62,7 @@
   const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
   const svg = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${SVG[name]}</svg>`;
 
-  // Strip control and bidi-override characters (they can spoof how a name reads).
-  const CTRL = /[\u0000-\u0008\u000B-\u001F\u007F​-‏‪-‮⁦-⁩﻿]/g;
+  const CTRL = /[\u0000-\u0008\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
   function cleanName(s) {
     return String(s || '').replace(CTRL, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME);
   }
@@ -85,7 +74,7 @@
     let s = String(raw || '');
     const m = /to=([A-Za-z0-9-]+)/.exec(s);
     if (m) s = m[1];
-    s = s.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    s = s.replace(/[\u0660-\u0669]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
     s = s.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (s.startsWith('RAWAQ')) s = s.slice(5);
     return s;
@@ -101,21 +90,18 @@
   const isTouch = matchMedia('(pointer: coarse)').matches;
   const mqMobile = matchMedia('(max-width: 899px)');
 
-  // Direction of the first strong character, so the timestamp sits at the line end.
   function isRtl(text) {
-    const m = /[֐-ࣿיִ-﷿ﹰ-﻿]|[A-Za-zÀ-ɏͰ-ԯ]/.exec(text);
-    return !m || /[֐-ࣿיִ-﷿ﹰ-﻿]/.test(m[0]);
+    const m = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]|[A-Za-z\u00C0-\u024F\u0370-\u052F]/.exec(text);
+    return !m || /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(m[0]);
   }
   function isJumbo(text) {
     const t = text.replace(/\s/g, '');
     if (!t || t.length > 16) return false;
     try {
-      return /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|‍|️)+$/u.test(t) &&
+      return /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F)+$/u.test(t) &&
         Array.from(t).filter((c) => /\p{Extended_Pictographic}/u.test(c)).length <= 3;
     } catch (_) { return false; }
   }
-
-  // ---------------------------------------------------------------- time
 
   const LOCALE = 'ar-u-nu-latn';
   const fTime = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', minute: '2-digit' });
@@ -148,8 +134,6 @@
     return 'آخر ظهور ' + dayLabel(ts);
   }
 
-  // ---------------------------------------------------------------- storage
-
   const store = {
     get(k, d) {
       try { const v = localStorage.getItem('rawaq.' + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; }
@@ -157,9 +141,9 @@
     set(k, v) {
       try { localStorage.setItem('rawaq.' + k, JSON.stringify(v)); } catch (e) { console.warn('rawaq: save failed', e); }
     },
-    del(k) { try { localStorage.removeItem('rawaq.' + k); } catch (_) { /* ignore */ } },
+    del(k) { try { localStorage.removeItem('rawaq.' + k); } catch (_) {} },
     clear() {
-      try { Object.keys(localStorage).filter((k) => k.startsWith('rawaq.')).forEach((k) => localStorage.removeItem(k)); } catch (_) { /* ignore */ }
+      try { Object.keys(localStorage).filter((k) => k.startsWith('rawaq.')).forEach((k) => localStorage.removeItem(k)); } catch (_) {}
     },
   };
 
@@ -170,13 +154,13 @@
     drafts: Object.create(null),
     active: null,
     net: 'idle',
-    theme: 'dark', // dark mode only
+    theme: 'dark',
     sound: store.get('sound', true) !== false,
-    reply: null,         // { id, text, me } quoted in the next message
+    reply: null,
     blocked: store.get('blocked', {}) || {},
     query: '',
-    presence: new Map(), // id -> online | connecting | offline | unreachable
-    typing: new Map(),   // id -> timer
+    presence: new Map(),
+    typing: new Map(),
   };
   if (S.me && (!isValidId(S.me.id) || !cleanName(S.me.name))) S.me = null;
 
@@ -184,7 +168,6 @@
     if (!S.msgs[id]) {
       const list = store.get('m.' + id, []);
       S.msgs[id] = Array.isArray(list) ? list : [];
-      // an upload can't survive a reload: the file is gone
       for (const m of S.msgs[id]) if (m.st === 'uploading') m.st = 'failed';
     }
     return S.msgs[id];
@@ -218,19 +201,17 @@
     }
     return c;
   }
-  const heardNames = new Map(); // id -> name announced over an open link
-  const heardPh = new Map();    // id -> profile photo hash announced over an open link
+  const heardNames = new Map();
+  const heardPh = new Map();
   const isBlocked = (id) => !!S.blocked[id];
   const nameOf = (c) => (c && c.name) || (c && c.id) || '';
-
-  // ---------------------------------------------------------------- network
 
   let peer = null;
   let stopped = true;
   let retry = 0;
   let retryTimer = 0;
-  const conns = new Map();   // id -> Set<DataConnection> (open)
-  const dialing = new Map(); // id -> { conn, timer }
+  const conns = new Map();
+  const dialing = new Map();
 
   const NET_TEXT = {
     idle: 'جارٍ التشغيل…',
@@ -270,7 +251,7 @@
     p.on('connection', (conn) => {
       if (peer !== p) return;
       const pid = idFromPeer(conn.peer);
-      if (!pid || isBlocked(pid)) { try { conn.close(); } catch (_) { /* ignore */ } return; }
+      if (!pid || isBlocked(pid)) { try { conn.close(); } catch (_) {} return; }
       adopt(conn);
     });
     p.on('disconnected', () => {
@@ -296,7 +277,7 @@
     peer = null;
     conns.clear();
     S.presence.clear();
-    if (p) { try { p.destroy(); } catch (_) { /* ignore */ } }
+    if (p) { try { p.destroy(); } catch (_) {} }
   }
 
   function halt(state) {
@@ -338,17 +319,15 @@
       if (id) dialFailed(id, 'offline');
       return;
     }
-    if (type === 'webrtc') return; // per-connection; dial timeouts cover it
+    if (type === 'webrtc') return;
     if (type === 'browser-incompatible') { halt('unsupported'); return; }
     if (type === 'unavailable-id') {
-      // Usually the server still holds our previous session for a moment.
       if (retry >= 5) { halt('taken'); return; }
       setNet('connecting');
       scheduleReconnect();
       return;
     }
     if (type === 'invalid-id' || type === 'invalid-key' || type === 'ssl-unavailable') { halt('error'); return; }
-    // network, server-error, socket-error, socket-closed, disconnected
     setNet(navigator.onLine === false ? 'offline' : 'connecting');
     scheduleReconnect();
   }
@@ -374,7 +353,7 @@
     if (d) {
       clearTimeout(d.timer);
       dialing.delete(id);
-      try { d.conn.close(); } catch (_) { /* ignore */ }
+      try { d.conn.close(); } catch (_) {}
     }
     if (!isOpen(id)) setPresence(id, why);
   }
@@ -396,8 +375,7 @@
     });
     conn.on('data', (data) => {
       conn._heard = Date.now();
-      // the other side is closing: drop the link now so new messages use the mailbox
-      if (data && data.t === 'bye') { try { conn.close(); } catch (_) { /* ignore */ } drop(); return; }
+      if (data && data.t === 'bye') { try { conn.close(); } catch (_) {} drop(); return; }
       onData(id, data);
     });
     const drop = () => {
@@ -411,15 +389,12 @@
     };
     conn.on('close', drop);
     conn.on('error', (err) => {
-      // an oversized message is rejected by PeerJS but the link itself is fine
       if (err && err.type === 'message-too-big') return;
-      try { conn.close(); } catch (_) { /* ignore */ }
+      try { conn.close(); } catch (_) {}
       drop();
     });
   }
 
-  // PeerJS's JSON channel refuses frames of ~16KB or more (and would report an error),
-  // so anything bigger must be split by the caller, like profile photos are.
   const MAX_FRAME = 15000;
   const utf8 = new TextEncoder();
   function send(conn, obj) {
@@ -442,12 +417,11 @@
     ids.forEach((id, i) => setTimeout(() => dial(id), i * 180));
   }
 
-  // keep-alive: notice silently dead links, and look for contacts coming online
   setInterval(() => {
     const now = Date.now();
     for (const set of conns.values()) {
       for (const c of set) {
-        if (now - (c._heard || now) > 45000) { try { c.close(); } catch (_) { /* ignore */ } } else send(c, { t: 'ping' });
+        if (now - (c._heard || now) > 45000) { try { c.close(); } catch (_) {} } else send(c, { t: 'ping' });
       }
     }
   }, 15000);
@@ -464,14 +438,6 @@
     if (S.active === id) { renderChatHead(); renderBanner(); }
   }
 
-  // ---------------------------------------------------------------- offline mailbox
-
-  // When there is no direct link, messages are end-to-end encrypted (ECDH P-256 +
-  // AES-GCM) and dropped into the recipient's inbox on a Firebase Realtime Database.
-  // The recipient streams its inbox, decrypts, handles each item exactly like a
-  // direct message, then deletes it. The server only ever sees ciphertext.
-  // Either an explicit URL, or just the instance name: the URL differs by region, so
-  // try each Realtime Database region and remember the one that answers.
   const DB_HOSTS = ['firebaseio.com', 'europe-west1.firebasedatabase.app', 'asia-southeast1.firebasedatabase.app'];
   const dbCandidates = () => {
     const c = CFG.db || {};
@@ -492,11 +458,9 @@
       dbResolving = (async () => {
         for (const u of cands) {
           try {
-            // keys/<id> is readable under the rules (keys/ itself is not); a 401 also
-            // proves the database lives on this host, a wrong region answers 404
             const r = await fetch(`${u}/keys/PROBE.json`, { cache: 'no-store' });
             if (r.ok || r.status === 401) { store.set('dbUrl', u); DB = u; break; }
-          } catch (_) { /* wrong region or offline: try the next */ }
+          } catch (_) {}
         }
         dbResolving = null;
         return DB;
@@ -504,12 +468,12 @@
     }
     return dbResolving;
   }
-  let myKeys = null;              // { priv: CryptoKey, pub: base64 raw public key }
-  let es = null;                  // EventSource on our inbox
+  let myKeys = null;
+  let es = null;
   let published = false;
-  const pubCache = new Map();     // id -> base64 public key
-  const noKey = new Set();        // ids with no published key yet: can't get offline messages
-  const aesCache = new Map();     // id -> AES-GCM CryptoKey shared with that id
+  const pubCache = new Map();
+  const noKey = new Set();
+  const aesCache = new Map();
   const mbReady = () => !!(DB && myKeys && S.me && owner && window.crypto && crypto.subtle);
 
   const b64 = (u8) => { let s2 = ''; for (let i = 0; i < u8.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s2); };
@@ -524,7 +488,7 @@
         myKeys = { priv: await crypto.subtle.importKey('jwk', saved.priv, ECDH, false, ['deriveKey']), pub: saved.pub };
         return myKeys;
       }
-    } catch (_) { /* regenerate below */ }
+    } catch (_) {}
     const kp = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
     const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
     const pub = b64(new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey)));
@@ -536,7 +500,7 @@
   async function db(method, path, body) {
     const res = await fetch(`${DB}/${path}.json`, {
       method,
-      body: body === undefined ? undefined : JSON.stringify(body), // no JSON header: keeps POST a simple CORS request
+      body: body === undefined ? undefined : JSON.stringify(body),
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`db ${res.status}`);
@@ -550,7 +514,7 @@
       if (cur == null) await db('PUT', `keys/${S.me.id}`, myKeys.pub);
       else if (cur !== myKeys.pub) console.warn('rawaq: a different key is registered for this ID');
       published = true;
-    } catch (_) { /* retried on the next start */ }
+    } catch (_) {}
   }
 
   async function sharedKey(id) {
@@ -558,7 +522,7 @@
     let pub = pubCache.get(id);
     if (!pub) {
       const v = await db('GET', `keys/${id}`);
-      if (typeof v !== 'string' || v.length > 200) { // they haven't opened Rawaq since the mailbox existed
+      if (typeof v !== 'string' || v.length > 200) {
         noKey.add(id);
         if (S.active === id) renderBanner();
         return null;
@@ -588,19 +552,15 @@
     }
   }
 
-  const mbBusy = new Set(); // message ids with a mailbox drop in flight
+  const mbBusy = new Set();
 
-  // Direct link if there is one, otherwise the mailbox.
   async function post(id, obj) {
     if (isOpen(id) && sendTo(id, obj)) return true;
     return mailboxSend(id, obj);
   }
 
-  // A new or retried message: direct when linked; otherwise mailbox now, link later.
   function dispatch(id, m) {
     if (isOpen(id) && sendTo(id, wireMsg(m))) {
-      // a link can look open while the other side has just gone away: if no
-      // delivery receipt comes back soon, drop a copy in the mailbox as well
       if (mbReady()) setTimeout(() => { if (m.st === 'pending' && !isBlocked(id) && msgsOf(id).includes(m)) mailboxDrop(id, m); }, 4000);
       return;
     }
@@ -622,8 +582,6 @@
     });
   }
 
-  // Wake the recipient's phone (installed app) through the push worker.
-  // At most once per 15s per person; the notification carries no message text.
   const pushPinged = new Map();
   function pingPush(to) {
     const url = CFG.push && CFG.push.worker;
@@ -634,7 +592,6 @@
     fetch(url, { method: 'POST', body: JSON.stringify({ to }), keepalive: true }).catch(() => {});
   }
 
-  // pending messages whose mailbox drop failed (offline, recipient had no key yet, …)
   function retryMailbox() {
     if (!mbReady() || document.visibilityState === 'hidden') return;
     for (const id of Object.keys(S.contacts)) {
@@ -660,7 +617,7 @@
         const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(v.iv), additionalData: utf8.encode(`${from}>${S.me.id}`) }, k, unb64(v.c));
         payload = JSON.parse(new TextDecoder().decode(pt));
       } catch (_) {
-        aesCache.delete(from); // their key may have changed: refetch once
+        aesCache.delete(from);
         pubCache.delete(from);
       }
     }
@@ -687,11 +644,10 @@
     let items = [];
     if (parts.length === 0 && d.data && typeof d.data === 'object') items = Object.entries(d.data);
     else if (parts.length === 1 && d.data) items = [[parts[0], d.data]];
-    items.sort((a, b) => (a[0] < b[0] ? -1 : 1)); // push keys are chronological
+    items.sort((a, b) => (a[0] < b[0] ? -1 : 1));
     for (const [k, v] of items) inboxChain = inboxChain.then(() => handleEnvelope(k, v));
   }
 
-  // off | connecting | on | error — shown in the profile sheet
   let mbState = 'off';
   function setMbState(st) {
     mbState = st;
@@ -731,8 +687,6 @@
   function mbStop() {
     if (es) { es.close(); es = null; }
   }
-
-  // ---------------------------------------------------------------- protocol
 
   function helloMsg() {
     return { t: 'hello', name: S.me.name, v: 1, ph: S.me.photo ? hashStr(S.me.photo) : '' };
@@ -774,7 +728,7 @@
       case 'react': onReact(id, d); break;
       case 'unsend': onUnsend(id, d); break;
       case 'unsent': case 'unsend-no': onUnsendReply(id, d); break;
-      default: break; // ping / unknown
+      default: break;
     }
   }
 
@@ -786,7 +740,7 @@
     post(id, { t: 'ack', id: d.id });
 
     const list = msgsOf(id);
-    if (list.some((m) => m.id === d.id)) return; // duplicate after a retry
+    if (list.some((m) => m.id === d.id)) return;
 
     const c = ensureContact(id);
     const ts = Number.isFinite(d.ts) && d.ts > 0 ? Math.min(d.ts, Date.now()) : Date.now();
@@ -794,7 +748,6 @@
     if (media) m.media = media;
     const re = d.re;
     if (re && typeof re === 'object' && typeof re.id === 'string' && re.id.length <= 40 && typeof re.text === 'string') {
-      // "by" is from the sender's side: 's' = they quoted themselves, 'r' = they quoted us
       m.re = { id: re.id, text: cleanText(re.text).slice(0, 160), me: re.by === 'r' };
     }
     list.push(m);
@@ -836,26 +789,25 @@
     }
   }
 
-  // Profile photos are sent in small parts and put back together on arrival.
   const AVATAR_PART = 8000;
   function sendAvatar(id) {
     const data = S.me && S.me.photo;
     if (!data) return;
     const ph = hashStr(data);
-    if (!isOpen(id)) { mailboxSend(id, { t: 'avatar', ph, data }); return; } // the mailbox takes it whole
+    if (!isOpen(id)) { mailboxSend(id, { t: 'avatar', ph, data }); return; }
     const n = Math.ceil(data.length / AVATAR_PART);
     for (let i = 0; i < n; i++) {
       if (!sendTo(id, { t: 'avatar', ph, i, n, part: data.slice(i * AVATAR_PART, (i + 1) * AVATAR_PART) })) return;
     }
   }
 
-  const avatarParts = new Map(); // id -> { ph, n, parts, got }
+  const avatarParts = new Map();
   function receiveAvatarPart(id, d) {
     const c = S.contacts[id];
     if (!c || typeof d.ph !== 'string' || d.ph.length > 16) return;
     let data = null;
     if (typeof d.data === 'string') {
-      data = d.data; // single-frame form
+      data = d.data;
     } else {
       const n = d.n;
       const i = d.i;
@@ -967,7 +919,7 @@
     if (prev) clearTimeout(prev);
     if (on) S.typing.set(id, setTimeout(() => setTyping(id, false), 6000));
     else S.typing.delete(id);
-    if (!!prev === on) return; // nothing visible changed
+    if (!!prev === on) return;
     renderList();
     if (S.active === id) {
       renderChatHead();
@@ -978,9 +930,6 @@
     }
   }
 
-  // ---------------------------------------------------------------- single tab
-
-  // Only one tab may own the ID on the signalling server at a time.
   const bc = 'BroadcastChannel' in window ? new BroadcastChannel('rawaq') : null;
   let owner = !bc;
   function claimTab() {
@@ -1010,8 +959,6 @@
       }
     });
   }
-
-  // ---------------------------------------------------------------- views
 
   function showView(name) {
     $$('.view').forEach((v) => v.classList.toggle('on', v.id === 'v-' + name));
@@ -1057,8 +1004,6 @@
       box.appendChild(s);
     });
   }
-
-  // ---------------------------------------------------------------- list
 
   let listQueued = false;
   const listNodes = new Map();
@@ -1153,14 +1098,12 @@
 
   function updateTitle() {
     const n = Object.values(S.contacts).reduce((s, c) => s + (c.unread || 0), 0);
-    document.title = n ? `(${n}) رواق` : 'رواق';
+    document.title = n ? `(${n}) همس` : 'همس';
     try {
       if (n && navigator.setAppBadge) navigator.setAppBadge(n).catch(() => {});
       else if (!n && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
-    } catch (_) { /* ignore */ }
+    } catch (_) {}
   }
-
-  // ---------------------------------------------------------------- chat
 
   const scroller = $('#scroller');
   const box = $('#messages');
@@ -1300,7 +1243,7 @@
         if (unreadId && m.id === unreadId) {
           sep = el('div', 'unread-sep');
           sep.appendChild(el('span', null, 'رسائل جديدة'));
-          nodes.splice(nodes.length - 1, 0, sep); // after the day label, before the message
+          nodes.splice(nodes.length - 1, 0, sep);
         }
         nodes.forEach((n) => frag.appendChild(n));
         lastShown = m;
@@ -1346,7 +1289,7 @@
   function linkify(p, text) {
     let at = 0;
     for (const match of text.matchAll(URL_RE)) {
-      let url = match[0].replace(/[.,!?؟،؛:)\]}'"]+$/, '');
+      let url = match[0].replace(/[.,!?\u061F\u060C\u061B:)\]}'"]+$/, '');
       if (match.index > at) p.appendChild(document.createTextNode(text.slice(at, match.index)));
       const a = el('a', null, url);
       a.href = url;
@@ -1499,8 +1442,6 @@
   }
   $('#jump').addEventListener('click', () => { scrollToBottom(true); hideJump(); });
 
-  // ---------------------------------------------------------------- composer
-
   function autosize() {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
@@ -1548,8 +1489,6 @@
     cancelReply();
     sendMessage(text, re);
   }
-
-  // ---------------------------------------------------------------- replies
 
   function startReply(m) {
     if (!S.active) return;
@@ -1609,18 +1548,14 @@
     renderList();
   }
 
-  // ---------------------------------------------------------------- delete for everyone
-
-  // Allowed only while the other side hasn't read the message. Requests wait in a
-  // queue until the other side confirms, and the receiver refuses if it was already read.
-  const unsendQ = store.get('unsend', {}) || {}; // chatId -> [{ id, m }]
+  const unsendQ = store.get('unsend', {}) || {};
   const saveUnsendQ = () => store.set('unsend', unsendQ);
 
   function unsendMsg(m) {
     const cid = S.active;
     if (!cid || !m.me || m.st === 'read') return;
-    const delivered = m.st === 'delivered' || m.st === 'sent'; // 'sent' = waiting in their mailbox
-    deleteMsg(m, cid); // never-delivered messages just leave the outbox
+    const delivered = m.st === 'delivered' || m.st === 'sent';
+    deleteMsg(m, cid);
     if (!delivered) { toast('تم حذف الرسالة لدى الجميع', { icon: 'check' }); return; }
     const copy = Object.assign({}, m);
     delete copy.rxp;
@@ -1639,8 +1574,8 @@
   function onUnsend(cid, d) {
     if (typeof d.id !== 'string') return;
     const m = findMsg(cid, d.id);
-    if (!m) { post(cid, { t: 'unsent', id: d.id }); return; } // already gone
-    if (m.me) return;                                            // only the sender may unsend
+    if (!m) { post(cid, { t: 'unsent', id: d.id }); return; }
+    if (m.me) return;
     if (m.seen) { post(cid, { t: 'unsend-no', id: d.id }); return; }
     deleteMsg(m, cid);
     post(cid, { t: 'unsent', id: d.id });
@@ -1655,7 +1590,6 @@
     if (!q.length) delete unsendQ[cid];
     saveUnsendQ();
     if (d.t !== 'unsend-no' || !item.m) return;
-    // it was read before the request arrived: put it back where it was
     const list = msgsOf(cid);
     if (list.some((x) => x.id === item.id)) return;
     item.m.st = 'read';
@@ -1666,14 +1600,12 @@
     toast('تعذّر الحذف لدى الجميع — تمت قراءتها', { icon: 'alert', ms: 3500 });
   }
 
-  // ---------------------------------------------------------------- message menu
-
   const ctx = $('#ctx');
   const ctxCard = $('#ctx-card');
   let ctxMsg = null;
   let heldRow = null;
 
-  let ctxHold = false; // true from a long-press until the finger has lifted
+  let ctxHold = false;
   function openCtx(m, row, byTouch) {
     if (!S.active) return;
     closeCtx(true);
@@ -1713,7 +1645,7 @@
     ctxCard.style.transformOrigin = `${m.me ? 'left' : 'right'} ${originY}`;
     void ctx.offsetWidth;
     ctx.classList.add('open');
-    if (isTouch && navigator.vibrate) { try { navigator.vibrate(8); } catch (_) { /* ignore */ } }
+    if (isTouch && navigator.vibrate) { try { navigator.vibrate(8); } catch (_) {} }
     if (!isTouch) { const f = $('.react', ctxCard); if (f) f.focus({ preventScroll: true }); }
   }
 
@@ -1727,8 +1659,6 @@
     else setTimeout(() => { if (!ctx.classList.contains('open')) ctx.hidden = true; }, 260);
   }
 
-  // the click synthesised from lifting the finger lands on whatever is under it
-  // (usually the backdrop); swallow it so the menu stays open
   let holdUntil = 0;
   const releaseHold = () => { if (ctxHold && !holdUntil) holdUntil = Date.now() + 350; };
   window.addEventListener('touchend', releaseHold, true);
@@ -1736,7 +1666,6 @@
   window.addEventListener('pointercancel', releaseHold, true);
   ctx.addEventListener('click', async (e) => {
     if (ctxHold) {
-      // swallow only the one click that the lift itself produces
       const fromLift = !holdUntil || Date.now() <= holdUntil;
       ctxHold = false;
       holdUntil = 0;
@@ -1759,7 +1688,6 @@
       if (ok) deleteMsg(m);
     }
   });
-  // close on a real scroll only: momentum from an earlier swipe must not snap it shut
   let ctxScroll = 0;
   scroller.addEventListener('scroll', () => {
     if (!ctx.hidden && Math.abs(scroller.scrollTop - ctxScroll) > 24) closeCtx();
@@ -1770,7 +1698,6 @@
   let suppressClick = false;
   box.addEventListener('click', (e) => {
     if (suppressClick) {
-      // the tap that ends a long-press must not also follow a link or quote
       suppressClick = false;
       e.preventDefault();
       e.stopPropagation();
@@ -1801,9 +1728,7 @@
     else openCtx(m, row);
   });
 
-  // touch: long-press opens the menu, horizontal swipe replies
   let gesture = null;
-  // while a finger rests on a bubble it sinks in slightly; it springs back on release
   let pressedRow = null;
   function unpress() {
     if (pressedRow) pressedRow.classList.remove('pressing');
@@ -1848,7 +1773,7 @@
       g.row.style.setProperty('--sw', Math.min(1, Math.abs(d) / 56).toFixed(2));
       if (!g.armed && Math.abs(d) >= 56) {
         g.armed = true;
-        if (navigator.vibrate) { try { navigator.vibrate(6); } catch (_) { /* ignore */ } }
+        if (navigator.vibrate) { try { navigator.vibrate(6); } catch (_) {} }
       }
     }
   });
@@ -1870,7 +1795,6 @@
   }
   box.addEventListener('pointerup', endGesture);
   box.addEventListener('pointercancel', endGesture);
-  // the finger may lift outside the message list
   window.addEventListener('pointerup', unpress);
   window.addEventListener('pointercancel', unpress);
   scroller.addEventListener('scroll', unpress, { passive: true });
@@ -1883,11 +1807,8 @@
     }
   });
   $('#composer').addEventListener('submit', (e) => { e.preventDefault(); submit(); });
-  // keep the keyboard open on phones when tapping send
   $('#send').addEventListener('pointerdown', (e) => { if (document.activeElement === input) e.preventDefault(); });
   $('#send').addEventListener('animationend', (e) => e.currentTarget.classList.remove('fly'));
-
-  // ---------------------------------------------------------------- images
 
   const PHOTO_RE = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
   function hashStr(str) {
@@ -1898,7 +1819,7 @@
 
   async function loadBitmap(file) {
     if ('createImageBitmap' in window) {
-      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) { /* fall back */ }
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) {}
     }
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -1910,7 +1831,6 @@
   }
   const sizeOf = (b) => ({ w: b.width || b.naturalWidth || 0, h: b.height || b.naturalHeight || 0 });
 
-  // Square-cropped 256px JPEG: small enough to send over the data channel.
   async function makeAvatar(file) {
     const bmp = await loadBitmap(file);
     const { w, h } = sizeOf(bmp);
@@ -1926,7 +1846,6 @@
     return cv.toDataURL('image/jpeg', 0.85);
   }
 
-  // Re-encode photos (max 2048px) before upload: smaller, and strips EXIF such as GPS location.
   async function prepareImage(file) {
     const bmp = await loadBitmap(file);
     const { w, h } = sizeOf(bmp);
@@ -1967,9 +1886,7 @@
   };
   const fmtSize = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' ميجا' : Math.max(1, Math.round(b / 1024)) + ' كيلو');
 
-  // ---------------------------------------------------------------- media messages
-
-  const uploads = new Map(); // message id -> { blob, preview, kind, xhr, pct }
+  const uploads = new Map();
   const cloudReady = () => !!(CFG.cloud.uploadPreset && (CFG.cloud.cloudName || CFG.cloud.uploadUrl));
   const uploadUrl = () => CFG.cloud.uploadUrl ||
     `https://api.cloudinary.com/v1_1/${encodeURIComponent(CFG.cloud.cloudName)}/auto/upload`;
@@ -1989,7 +1906,6 @@
     return m.text ? `${label} · ${m.text}` : label;
   }
 
-  // Cloudinary can resize on the fly; other hosts are used as-is.
   function cdn(url, t) {
     const i = url.indexOf('/upload/');
     if (i < 0 || !url.startsWith('https://res.cloudinary.com/')) return url;
@@ -2155,9 +2071,6 @@
     startUpload(id, m);
   }
 
-  // Every upload gets its own random, unguessable name and public ID. A fixed name
-  // ("photo.jpg") let presets that name assets after the file return someone else's
-  // earlier photo instead of storing the new one — never let that happen again.
   const randomName = () => rand(24, 'abcdefghijkmnopqrstuvwxyz23456789');
   function startUpload(cid, m, attempt = 0) {
     const up = uploads.get(m.id);
@@ -2167,7 +2080,7 @@
     const ext = up.kind === 'image' ? 'jpg' : ((up.blob.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
     fd.append('file', up.blob, `${pid}.${ext}`);
     fd.append('upload_preset', CFG.cloud.uploadPreset);
-    if (attempt < 2) fd.append('public_id', pid); // a preset may forbid it; the last try relies on the random file name
+    if (attempt < 2) fd.append('public_id', pid);
     const xhr = new XMLHttpRequest();
     up.xhr = xhr;
     up.pct = 0;
@@ -2179,7 +2092,7 @@
     };
     const fail = (why) => {
       up.xhr = null;
-      if (!uploads.has(m.id)) return; // cancelled
+      if (!uploads.has(m.id)) return;
       m.st = 'failed';
       saveMsgs(cid);
       if (S.active === cid) refreshRow(m);
@@ -2188,18 +2101,16 @@
     xhr.onerror = () => fail('');
     xhr.onload = () => {
       let res = null;
-      try { res = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+      try { res = JSON.parse(xhr.responseText); } catch (_) {}
       if (xhr.status < 200 || xhr.status >= 300 || !res || !res.secure_url) {
         if (attempt < 2 && xhr.status === 400 && res && res.error && /public.?id/i.test(String(res.error.message))) {
           up.xhr = null;
-          startUpload(cid, m, 2); // preset rejects custom public IDs
+          startUpload(cid, m, 2);
           return;
         }
         fail(res && res.error && res.error.message ? String(res.error.message).slice(0, 80) : '');
         return;
       }
-      // "existing" means the storage handed back an asset that was already there, i.e. NOT
-      // this file. Never send that link: retry under a fresh name, then give up.
       if (res.existing === true) {
         up.xhr = null;
         if (attempt < 2) { startUpload(cid, m, attempt + 1); return; }
@@ -2212,7 +2123,7 @@
       });
       if (!media) { fail(''); return; }
       up.xhr = null;
-      up.blob = null; // keep the local preview so the bubble doesn't flicker
+      up.blob = null;
       m.media = media;
       m.st = 'pending';
       saveMsgs(cid);
@@ -2230,8 +2141,6 @@
     refreshRow(m);
     startUpload(S.active, m);
   }
-
-  // ---------------------------------------------------------------- viewer
 
   const viewer = $('#viewer');
   function openViewer(m) {
@@ -2271,14 +2180,12 @@
   $('#viewer-close').addEventListener('click', closeViewer);
   viewer.addEventListener('click', (e) => { if (e.target === viewer || e.target.id === 'viewer-stage') closeViewer(); });
 
-  // ---------------------------------------------------------------- blocking
-
   function dropPeer(id) {
     const d = dialing.get(id);
-    if (d) { clearTimeout(d.timer); dialing.delete(id); try { d.conn.close(); } catch (_) { /* ignore */ } }
+    if (d) { clearTimeout(d.timer); dialing.delete(id); try { d.conn.close(); } catch (_) {} }
     const set = conns.get(id);
     conns.delete(id);
-    if (set) for (const c of set) { try { c.close(); } catch (_) { /* ignore */ } }
+    if (set) for (const c of set) { try { c.close(); } catch (_) {} }
     S.presence.delete(id);
   }
 
@@ -2334,8 +2241,6 @@
     }
   }
 
-  // ---------------------------------------------------------------- verified badge
-
   const VERIFIED = new Set((CFG.verified || []).map(normalizeId).filter(isValidId));
   const isVerified = (id) => VERIFIED.has(id);
 
@@ -2361,7 +2266,6 @@
   const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
   const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Telegram-style: the card rises up out of the badge you tapped.
   const vpop = $('#vpop');
   const vcard = $('#vpop-card');
   let vAnchor = null;
@@ -2381,7 +2285,6 @@
     const vh = $('#app').clientHeight;
     const ax = a.left + a.width / 2;
     let left = Math.max(12, Math.min(vw - w - 12, ax - w / 2));
-    // sit above the badge when there is room, otherwise centred on screen
     let top = a.top - h - 14;
     if (top < 12) top = Math.max(12, (vh - h) / 2);
     vcard.style.left = left + 'px';
@@ -2391,14 +2294,13 @@
     void vpop.offsetWidth;
     vpop.classList.add('open');
     if (!reduceMotion()) {
-      // always rises upward, easing in with a soft spring
       vcard.animate([
         { opacity: 0, transform: 'translateY(70px) scale(.55)' },
         { opacity: 1, offset: 0.4 },
         { opacity: 1, transform: 'none' },
       ], { duration: 680, easing: SPRING, fill: 'both' });
     }
-    if (isTouch && navigator.vibrate) { try { navigator.vibrate(10); } catch (_) { /* ignore */ } }
+    if (isTouch && navigator.vibrate) { try { navigator.vibrate(10); } catch (_) {} }
     setTimeout(() => { const f = $('[data-vpop-close].btn', vcard); if (f && !isTouch) f.focus({ preventScroll: true }); }, 80);
   }
   function closeBadgePop() {
@@ -2413,7 +2315,6 @@
     if (vAnchor && !isTouch) vAnchor.focus({ preventScroll: true });
   }
   vpop.addEventListener('click', (e) => { if (e.target.closest('[data-vpop-close]')) closeBadgePop(); });
-  // capture phase so a badge inside a chat row doesn't also open the chat
   document.addEventListener('click', (e) => {
     const b = e.target.closest && e.target.closest('.vbadge');
     if (!b) return;
@@ -2429,10 +2330,6 @@
     }
   }, true);
 
-  // ---------------------------------------------------------------- profile panel
-
-  // Telegram-style shared element transition: the header avatar and name
-  // grow and glide up into the profile, and back down on close.
   const profileEl = $('#profile');
   const pfAvatar = $('#pf-avatar');
   const pfName = $('#pf-name-line');
@@ -2509,8 +2406,6 @@
   $('#pf-copy').addEventListener('click', () => { if (S.active) copyText(S.active, 'تم نسخ المعرّف'); });
   $('#pf-block').addEventListener('click', () => $('#btn-block').click());
 
-  // ---------------------------------------------------------------- feedback
-
   function toast(text, opts = {}) {
     const wrap = $('#toasts');
     while (wrap.children.length >= 3) wrap.firstChild.remove();
@@ -2552,11 +2447,9 @@
       try {
         const n = new Notification(nameOf(c), opts);
         n.onclick = () => { window.focus(); openChat(c.id); n.close(); };
-      } catch (_) { /* some mobile browsers only allow service-worker notifications */ }
+      } catch (_) {}
     }
   }
-
-  // ---------------------------------------------------------------- sound
 
   let actx = null;
   function unlockAudio() {
@@ -2568,7 +2461,7 @@
         actx = new AC();
       }
       if (actx.state === 'suspended') actx.resume();
-    } catch (_) { /* ignore */ }
+    } catch (_) {}
   }
   function chime(kind) {
     if (!S.sound || !actx || actx.state !== 'running') return;
@@ -2594,8 +2487,6 @@
     $('#btn-sound').setAttribute('aria-checked', String(S.sound));
   }
 
-  // ---------------------------------------------------------------- QR
-
   function renderQr() {
     const holder = $('#qr');
     holder.textContent = '';
@@ -2609,8 +2500,6 @@
     holder.innerHTML = `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges" aria-hidden="true"><path d="${d}"/></svg>`;
   }
 
-  // ---------------------------------------------------------------- install (PWA)
-
   let swReg = null;
   let installEvt = null;
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -2623,7 +2512,7 @@
     else b.hidden = true;
   }
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; renderInstall(); });
-  window.addEventListener('appinstalled', () => { installEvt = null; renderInstall(); toast('تم تثبيت رواق', { icon: 'check' }); });
+  window.addEventListener('appinstalled', () => { installEvt = null; renderInstall(); toast('تم تثبيت همس', { icon: 'check' }); });
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
     navigator.serviceWorker.register('sw.js').then((r) => { swReg = r; }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (e) => {
@@ -2659,17 +2548,15 @@
 
   const inviteLink = () => location.origin + location.pathname + '#to=' + S.me.id;
   async function shareMe() {
-    const text = `تعال كلّمني على رواق 🤍\nمعرّفي: ${S.me.id}`;
+    const text = `تعال كلّمني على همس 🤍\nمعرّفي: ${S.me.id}`;
     const url = inviteLink();
     if (navigator.share) {
-      try { await navigator.share({ title: 'رواق', text, url }); return; } catch (e) {
+      try { await navigator.share({ title: 'همس', text, url }); return; } catch (e) {
         if (e && e.name === 'AbortError') return;
       }
     }
     copyText(`${text}\n${url}`, 'تم نسخ رابط الدعوة');
   }
-
-  // ---------------------------------------------------------------- modals
 
   let openM = null;
   let lastFocus = null;
@@ -2734,20 +2621,14 @@
     });
   }
 
-  // ---------------------------------------------------------------- theme
-
-  // Black and white, dark mode only: there is no light theme to switch to.
   function applyTheme() {
     document.documentElement.dataset.theme = 'dark';
     const meta = $('meta[name="theme-color"]');
     if (meta) meta.content = '#000000';
   }
 
-  // ---------------------------------------------------------------- notifications setting
-
   const pushConfigured = () => !!(CFG.push && CFG.push.publicKey && CFG.push.worker && DB);
   const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-  // iPhone/iPad only allow web notifications for apps added to the home screen
   const needsInstall = () => isIOS && !isStandalone();
 
   function renderNotify() {
@@ -2770,7 +2651,6 @@
     return Uint8Array.from(atob((s2 + pad).replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
   };
 
-  // Subscribe this device to Web Push and register it under our ID.
   async function ensurePush() {
     if (!pushConfigured() || !pushSupported() || !S.me || !owner) return false;
     if (Notification.permission !== 'granted') return false;
@@ -2794,12 +2674,12 @@
 
   async function enableNotifications() {
     if (needsInstall()) {
-      toast('أضف رواق للشاشة الرئيسية أولاً', { icon: 'alert', ms: 4000 });
+      toast('أضف همس للشاشة الرئيسية أولاً', { icon: 'alert', ms: 4000 });
       return;
     }
     if (!('Notification' in window)) { toast('متصفحك لا يدعم التنبيهات', { icon: 'alert' }); return; }
     if (Notification.permission === 'default') {
-      try { await Notification.requestPermission(); } catch (_) { /* ignore */ }
+      try { await Notification.requestPermission(); } catch (_) {}
     } else if (Notification.permission === 'denied') {
       toast('التنبيهات محظورة من المتصفح', { icon: 'alert' });
     }
@@ -2811,9 +2691,6 @@
     renderNotifCard();
   }
 
-  // ---------------------------------------------------------------- viewport
-
-  // Keep the app exactly the size of the visible area (mobile keyboards included).
   function fitViewport() {
     const vv = window.visualViewport;
     const set = () => {
@@ -2825,8 +2702,6 @@
     (vv || window).addEventListener('resize', set);
     if (vv) vv.addEventListener('scroll', set);
   }
-
-  // ---------------------------------------------------------------- invite links
 
   let intent = null;
   let openIntent = null;
@@ -2863,10 +2738,7 @@
     return null;
   }
 
-  // ---------------------------------------------------------------- events
-
   function bind() {
-    // welcome
     $('#in-name').addEventListener('input', () => clearErr($('#welcome-err')));
     $('#f-welcome').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -2886,7 +2758,6 @@
       consumeIntent();
     });
 
-    // shared actions
     document.addEventListener('click', (e) => {
       if (!S.me) return;
       if (e.target.closest('[data-copy-id]')) copyText(S.me.id, 'تم نسخ معرّفك');
@@ -2894,7 +2765,6 @@
       else if (e.target.closest('[data-qr]')) { renderQr(); openModal('m-qr'); }
     });
 
-    // sidebar
     $('#btn-me').addEventListener('click', () => {
       $('#in-rename').value = S.me.name;
       renderBlocked();
@@ -2914,13 +2784,12 @@
       openModal('m-new', '#in-peer');
     });
 
-    // new chat
     const peerIn = $('#in-peer');
     peerIn.addEventListener('input', () => {
       clearErr($('#new-err'));
       const raw = peerIn.value;
       if (/to=|rawaq/i.test(raw)) peerIn.value = normalizeId(raw);
-      else peerIn.value = raw.toUpperCase().replace(/[^A-Z0-9٠-٩]/g, '');
+      else peerIn.value = raw.toUpperCase().replace(/[^A-Z0-9\u0660-\u0669]/g, '');
     });
     $('#f-new').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -2941,7 +2810,6 @@
       }
     });
 
-    // profile
     $('#f-rename').addEventListener('submit', (e) => {
       e.preventDefault();
       const name = cleanName($('#in-rename').value);
@@ -2964,14 +2832,13 @@
       if (installEvt) {
         const evt = installEvt;
         installEvt = null;
-        try { evt.prompt(); await evt.userChoice; } catch (_) { /* ignore */ }
+        try { evt.prompt(); await evt.userChoice; } catch (_) {}
         renderInstall();
       } else if (isIOS) {
         toast('مشاركة ← إضافة إلى الشاشة الرئيسية', { icon: 'alert', ms: 4000 });
       }
     });
 
-    // profile photo
     $('#btn-photo').addEventListener('click', () => $('#in-photo').click());
     $('#in-photo').addEventListener('change', async (e) => {
       const file = e.target.files && e.target.files[0];
@@ -2998,7 +2865,6 @@
       toast('تمت إزالة الصورة', { icon: 'check' });
     });
 
-    // blocking
     $('#btn-blocked').addEventListener('click', () => { renderBlocked(); openModal('m-blocked'); });
     $('#btn-block').addEventListener('click', async () => {
       const id = S.active;
@@ -3022,7 +2888,6 @@
       toast(`ألغيت حظر ${nameOf(S.contacts[id])}`, { icon: 'check' });
     });
 
-    // media
     $('#btn-attach').addEventListener('click', () => {
       if (!cloudReady()) {
         toast('رفع الوسائط غير متاح', { icon: 'alert' });
@@ -3079,11 +2944,9 @@
       const file = e.dataTransfer.files && e.dataTransfer.files[0];
       if (file) pickMedia(file);
     });
-    // a file dropped anywhere else must not navigate away from the app
     window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
     window.addEventListener('drop', (e) => { if (hasFiles(e)) e.preventDefault(); });
 
-    // search
     const q = $('#q');
     q.addEventListener('input', () => {
       S.query = q.value.trim().toLowerCase();
@@ -3098,11 +2961,10 @@
       q.focus({ preventScroll: true });
     });
 
-    // no browser context menu: messages get Rawaq's own menu instead
     document.addEventListener('contextmenu', (e) => {
       if (e.target.closest('input, textarea')) return;
       e.preventDefault();
-      if (!ctx.hidden) return; // Android also fires this after our own long-press
+      if (!ctx.hidden) return;
       const row = e.target.closest('.msg');
       const m = row && box.contains(row) ? msgOfRow(row) : null;
       if (m) openCtx(m, row);
@@ -3124,7 +2986,6 @@
       location.replace(location.pathname);
     });
 
-    // chat
     $('#btn-back').addEventListener('click', () => closeChat());
     $('#btn-chat-menu').addEventListener('click', () => {
       const c = S.contacts[S.active];
@@ -3156,13 +3017,11 @@
       toast('تم حذف المحادثة', { icon: 'check' });
     });
 
-    // takeover from another tab
     $('#btn-takeover').addEventListener('click', () => {
       if (bc) bc.postMessage({ t: 'takeover', tab: TAB });
       setTimeout(() => location.reload(), 450);
     });
 
-    // lifecycle
     window.addEventListener('hashchange', () => { readIntent(); consumeIntent(); });
     window.addEventListener('online', () => reconnectNow(true));
     window.addEventListener('offline', () => setNet('offline'));
@@ -3177,20 +3036,15 @@
     window.addEventListener('pagehide', () => {
       flushSave();
       for (const set of conns.values()) for (const c of set) send(c, { t: 'bye' });
-      if (peer) { try { peer.destroy(); } catch (_) { /* ignore */ } }
+      if (peer) { try { peer.destroy(); } catch (_) {} }
     });
     window.addEventListener('pageshow', (e) => { if (e.persisted && owner && S.me) netStart(); });
     mqMobile.addEventListener('change', () => {
       if (!mqMobile.matches && history.state && history.state.chat) history.replaceState(null, '');
     });
-    // refresh relative times ("today", "last seen") once a minute
     setInterval(() => { renderList(); if (S.active) renderChatHead(); }, 60000);
   }
 
-  // ---------------------------------------------------------------- no zoom on phones
-
-  // iOS Safari ignores user-scalable=no, so block its pinch gestures directly.
-  // Double-tap zoom is turned off with touch-action: manipulation in CSS.
   for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
   }
@@ -3198,10 +3052,6 @@
     if (e.touches && e.touches.length > 1) e.preventDefault();
   }, { passive: false });
 
-  // ---------------------------------------------------------------- boot
-
-  // Fade the launch screen out once the first view is on screen and the fonts are in,
-  // keeping it up long enough for its intro animation to read as intentional.
   function hideSplash() {
     const sp = document.getElementById('splash');
     if (!sp) return;

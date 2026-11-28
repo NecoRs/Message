@@ -5,23 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#000000">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="رواق — مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
-  <meta property="og:title" content="رواق">
-  <meta property="og:description" content="مساحة هادئة لحديثك الخاص. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
+  <meta name="description" content="همس — محادثات خاصة مشفّرة بين الطرفين. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
+  <meta property="og:title" content="همس">
+  <meta property="og:description" content="محادثات خاصة مشفّرة بين الطرفين. اكتب اسمك، خذ معرّفك، وابدأ المحادثة.">
   <meta property="og:type" content="website">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="format-detection" content="telephone=no">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="رواق">
-  <title>رواق</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a0a0a'/%3E%3Cpath d='M14 46V30a9 9 0 0 1 18 0v16M32 46V30a9 9 0 0 1 18 0v16M10 46h44' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <meta name="apple-mobile-web-app-title" content="همس">
+  <title>همس</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%23000'/%3E%3Cg transform='translate%287 7%29 scale%28.708%29' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8h24a6.5 6.5 0 0 1 6.5 6.5v13A6.5 6.5 0 0 1 36 34H23l-8.5 6.5V34H12a6.5 6.5 0 0 1-6.5-6.5v-13A6.5 6.5 0 0 1 12 8Z'/%3E%3Cpath d='M24 14.5v13'/%3E%3Cpath d='M17 18v6M31 18v6'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap">
   <style>
-    /* launch screen for the installed app — inline so it paints before anything else loads */
     .splash { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: #000000; color: #ffffff;
       transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1); }
     .splash[hidden] { display: none; }
@@ -45,7 +44,8 @@
     @keyframes spRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
     @keyframes spDot { 0%, 100% { opacity: .2; transform: translateY(0); } 40% { opacity: .9; transform: translateY(-4px); } }
     @media (prefers-reduced-motion: reduce) { .splash *, .splash { animation-duration: .01ms !important; animation-delay: 0s !important; transition-duration: .01ms !important; } }
-  </style>
+  
+</style>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -53,18 +53,17 @@
     <div class="splash-in">
       <div class="splash-icon">
         <svg viewBox="0 0 48 48">
-          <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
-          <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
-          <path pathLength="1" d="M5 36h38"/>
+          <path pathLength="1" d="M12 8h24a6.5 6.5 0 0 1 6.5 6.5v13A6.5 6.5 0 0 1 36 34H23l-8.5 6.5V34H12a6.5 6.5 0 0 1-6.5-6.5v-13A6.5 6.5 0 0 1 12 8Z"/>
+          <path pathLength="1" d="M24 14.5v13"/>
+          <path pathLength="1" d="M17 18v6M31 18v6"/>
         </svg>
       </div>
-      <div class="splash-word">رواق</div>
+      <div class="splash-word">هَمس</div>
       <div class="splash-dots"><i></i><i></i><i></i></div>
     </div>
     <div class="splash-foot">مساحة هادئة لحديثك الخاص</div>
   </div>
   <script>
-    /* only when launched as the installed app; never longer than 5s even if something fails */
     (function () {
       var app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
       var s = document.getElementById('splash');
@@ -73,10 +72,10 @@
       window.__splashAt = Date.now();
       setTimeout(function () { if (s.parentNode) { s.classList.add('out'); setTimeout(function () { s.remove(); }, 700); } }, 5000);
     })();
-  </script>
+  
+</script>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
-      <!-- verified badge: white with a slow silver sheen -->
       <linearGradient id="vgrad" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stop-color="#ffffff"/>
         <stop offset=".5" stop-color="#a8a8a8"/>
@@ -87,26 +86,25 @@
         <path fill="url(#vgrad)" d="M12 1.6l2.2 1.6 2.7-.2.9 2.6 2.3 1.4-.6 2.6 1.3 2.4-1.9 1.9.2 2.7-2.6.8-1.3 2.4-2.6-.6L12 22.4l-2.2-1.6-2.6.6-1.3-2.4-2.6-.8.2-2.7-1.9-1.9 1.3-2.4-.6-2.6 2.3-1.4.9-2.6 2.7.2Z"/>
         <path d="m8.4 12.2 2.4 2.4 4.9-5" fill="none" stroke="#000" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
       </symbol>
-      <symbol id="arch" viewBox="0 0 48 48">
-        <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
-        <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
-        <path pathLength="1" d="M5 36h38"/>
+      <symbol id="mark" viewBox="0 0 48 48">
+        <path pathLength="1" d="M12 8h24a6.5 6.5 0 0 1 6.5 6.5v13A6.5 6.5 0 0 1 36 34H23l-8.5 6.5V34H12a6.5 6.5 0 0 1-6.5-6.5v-13A6.5 6.5 0 0 1 12 8Z"/>
+        <path pathLength="1" d="M24 14.5v13"/>
+        <path pathLength="1" d="M17 18v6M31 18v6"/>
       </symbol>
     </defs>
   </svg>
 
   <div class="app" id="app">
 
-    <!-- 1. Welcome: pick a name -->
     <section class="view" id="v-welcome" aria-labelledby="w-title">
       <div class="center">
         <div class="welcome reveal">
           <svg class="mark draw" style="--i:0" viewBox="0 0 48 48" aria-hidden="true">
-            <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
-            <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
-            <path pathLength="1" d="M5 36h38"/>
+            <path pathLength="1" d="M12 8h24a6.5 6.5 0 0 1 6.5 6.5v13A6.5 6.5 0 0 1 36 34H23l-8.5 6.5V34H12a6.5 6.5 0 0 1-6.5-6.5v-13A6.5 6.5 0 0 1 12 8Z"/>
+            <path pathLength="1" d="M24 14.5v13"/>
+            <path pathLength="1" d="M17 18v6M31 18v6"/>
           </svg>
-          <h1 class="wordmark" id="w-title" style="--i:1">رواق</h1>
+          <h1 class="wordmark" id="w-title" style="--i:1">هَمس</h1>
           <p class="tagline" style="--i:2">مساحة هادئة لحديثك الخاص</p>
           <form class="stack" id="f-welcome" style="--i:3" novalidate>
             <label class="sr-only" for="in-name">اسمك</label>
@@ -125,12 +123,11 @@
       </div>
     </section>
 
-    <!-- 2. Your ID -->
     <section class="view" id="v-id" aria-labelledby="id-title">
       <div class="center">
         <div class="welcome reveal">
           <p class="eyebrow" style="--i:0">أهلاً، <span id="id-hello" dir="auto"></span></p>
-          <h2 class="title" id="id-title" style="--i:1">هذا معرّفك في رواق</h2>
+          <h2 class="title" id="id-title" style="--i:1">هذا معرّفك في همس</h2>
           <div class="id-code" id="id-code" style="--i:2" dir="ltr"></div>
           <p class="muted" style="--i:3">شارك معرّفك ليتواصلوا معك</p>
           <div class="row" style="--i:4">
@@ -151,14 +148,13 @@
       </div>
     </section>
 
-    <!-- 3. Main: conversations + chat -->
     <section class="view main" id="v-main">
       <aside class="sidebar" aria-label="المحادثات">
         <header class="side-head">
           <div class="brand">
-            <span class="brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg></span>
+            <span class="brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><use href="#mark"/></svg></span>
             <div class="brand-text">
-              <b>رواق</b>
+              <b>همس</b>
               <button class="net" id="net" type="button" data-state="idle" title="حالة الاتصال">
                 <i></i><span id="net-text">…</span>
               </button>
@@ -209,7 +205,7 @@
         <div class="list-wrap">
           <ul class="list" id="list"></ul>
           <div class="empty" id="list-empty" hidden>
-            <svg class="empty-art" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
+            <svg class="empty-art" viewBox="0 0 48 48" aria-hidden="true"><use href="#mark"/></svg>
             <b>لا توجد محادثات بعد</b>
             <p>ابدأ محادثة جديدة بمعرّف صديقك</p>
           </div>
@@ -226,7 +222,7 @@
 
       <main class="chat" id="chat">
         <div class="chat-empty" id="chat-empty">
-          <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#arch"/></svg>
+          <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#mark"/></svg>
           <b>اختر محادثة</b>
           <p>أو ابدأ محادثة جديدة</p>
         </div>
@@ -345,16 +341,15 @@
       </main>
     </section>
 
-    <!-- Opened in another tab -->
     <section class="view" id="v-blocked">
       <div class="center">
         <div class="welcome reveal">
           <svg class="mark draw" style="--i:0" viewBox="0 0 48 48" aria-hidden="true">
-            <path pathLength="1" d="M9 36V21a7.5 7.5 0 0 1 15 0v15"/>
-            <path pathLength="1" d="M24 36V21a7.5 7.5 0 0 1 15 0v15"/>
-            <path pathLength="1" d="M5 36h38"/>
+            <path pathLength="1" d="M12 8h24a6.5 6.5 0 0 1 6.5 6.5v13A6.5 6.5 0 0 1 36 34H23l-8.5 6.5V34H12a6.5 6.5 0 0 1-6.5-6.5v-13A6.5 6.5 0 0 1 12 8Z"/>
+            <path pathLength="1" d="M24 14.5v13"/>
+            <path pathLength="1" d="M17 18v6M31 18v6"/>
           </svg>
-          <h2 class="title" style="--i:1">رواق مفتوح في نافذة أخرى</h2>
+          <h2 class="title" style="--i:1">همس مفتوح في نافذة أخرى</h2>
           <p class="muted" style="--i:2">نافذة واحدة فقط بنفس الوقت</p>
           <button class="btn btn-primary btn-block" type="button" id="btn-takeover" style="--i:3">استخدمه هنا</button>
         </div>
@@ -362,7 +357,6 @@
     </section>
   </div>
 
-  <!-- New chat -->
   <div class="modal" id="m-new" role="dialog" aria-modal="true" aria-labelledby="m-new-title" hidden>
     <div class="backdrop" data-close></div>
     <form class="sheet" id="f-new" novalidate>
@@ -389,7 +383,6 @@
     </form>
   </div>
 
-  <!-- Profile -->
   <div class="modal" id="m-me" role="dialog" aria-modal="true" aria-labelledby="m-me-title" hidden>
     <div class="backdrop" data-close></div>
     <div class="sheet">
@@ -446,7 +439,7 @@
       </button>
       <button class="row-btn" id="btn-install" type="button" hidden>
         <svg class="i" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M12 7v7M9 11l3 3 3-3M10.5 18.5h3"/></svg>
-        <span>ثبّت رواق كتطبيق</span>
+        <span>ثبّت همس كتطبيق</span>
         <span class="row-btn-state" id="install-state"></span>
       </button>
       <button class="row-btn" id="btn-blocked" type="button">
@@ -466,7 +459,6 @@
     </div>
   </div>
 
-  <!-- Chat options -->
   <div class="modal" id="m-chat" role="dialog" aria-modal="true" aria-labelledby="m-chat-title" hidden>
     <div class="backdrop" data-close></div>
     <div class="sheet sheet-sm">
@@ -493,7 +485,6 @@
     </div>
   </div>
 
-  <!-- Blocked users -->
   <div class="modal" id="m-blocked" role="dialog" aria-modal="true" aria-labelledby="m-blocked-title" hidden>
     <div class="backdrop" data-close></div>
     <div class="sheet sheet-sm">
@@ -509,7 +500,6 @@
     </div>
   </div>
 
-  <!-- Media preview before sending -->
   <div class="modal" id="m-media" role="dialog" aria-modal="true" aria-labelledby="m-media-title" hidden>
     <div class="backdrop" data-close></div>
     <form class="sheet" id="f-media" novalidate>
@@ -532,7 +522,6 @@
     </form>
   </div>
 
-  <!-- Full-screen media viewer -->
   <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="عرض الوسائط" hidden>
     <div class="viewer-stage" id="viewer-stage"></div>
     <div class="viewer-bar">
@@ -543,7 +532,6 @@
     </div>
   </div>
 
-  <!-- Confirm -->
   <div class="modal" id="m-confirm" role="alertdialog" aria-modal="true" aria-labelledby="cf-title" aria-describedby="cf-text" hidden>
     <div class="backdrop" data-close></div>
     <div class="sheet sheet-sm">
@@ -557,7 +545,6 @@
     </div>
   </div>
 
-  <!-- QR -->
   <div class="modal" id="m-qr" role="dialog" aria-modal="true" aria-labelledby="m-qr-title" hidden>
     <div class="backdrop" data-close></div>
     <div class="sheet sheet-sm qr-sheet">
@@ -579,7 +566,6 @@
     </div>
   </div>
 
-  <!-- Message menu -->
   <div class="ctx" id="ctx" hidden>
     <div class="ctx-backdrop" data-ctx-close></div>
     <div class="ctx-card" id="ctx-card" role="menu" aria-label="خيارات الرسالة">
@@ -605,7 +591,6 @@
     </div>
   </div>
 
-  <!-- Verified badge card -->
   <div class="vpop" id="vpop" hidden>
     <div class="vpop-backdrop" data-vpop-close></div>
     <div class="vpop-card" id="vpop-card" role="dialog" aria-modal="true" aria-labelledby="vpop-title">
@@ -622,7 +607,7 @@
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <noscript><p class="noscript">رواق يحتاج تفعيل JavaScript.</p></noscript>
+  <noscript><p class="noscript">همس يحتاج تفعيل JavaScript.</p></noscript>
 
   <script src="vendor/peerjs.min.js"></script>
   <script src="vendor/qrcode.min.js"></script>

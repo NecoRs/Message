@@ -1,18 +1,3 @@
-/*
- * رواق — خادم التنبيهات (Cloudflare Worker)
- *
- * يستقبل { to: "ID" } من رواق، يقرأ اشتراك التنبيهات لهذا المعرّف من Firebase،
- * ويرسل له تنبيه Web Push فاضي (بدون محتوى) موقّع بمفتاح VAPID.
- * التطبيق نفسه يعرض «وصلتك رسالة جديدة»، فما يمر أي نص رسالة من هنا.
- *
- * متغيرات البيئة (Settings ← Variables):
- *   DB_URL             اسم قاعدة Firebase (مثل rawaq-b78a7-default-rtdb) أو رابطها الكامل
- *   VAPID_PUBLIC       المفتاح العام (من tools/vapid.html)
- *   VAPID_PRIVATE_JWK  المفتاح الخاص — كـ Secret (مشفّر)، لا تحطه في أي مكان ثاني
- *   VAPID_SUBJECT      اختياري: رابط موقعك أو mailto:بريدك
- *   ALLOW_ORIGIN       اختياري: رابط موقعك فقط بدل * (مثل https://necors.github.io)
- */
-
 const ID_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
 
 export default {
@@ -51,14 +36,11 @@ export default {
         'Content-Length': '0',
       },
     });
-    // the subscription is gone (app uninstalled / permission revoked): forget it
     if (res.status === 404 || res.status === 410) await fetch(`${db}/push/${to}.json`, { method: 'DELETE' });
     return reply(200, { sent: res.ok, status: res.status });
   },
 };
 
-// DB_URL may be just the instance name: the REST host depends on the region,
-// so try each Realtime Database region once and keep the one that answers.
 const HOSTS = ['firebaseio.com', 'europe-west1.firebasedatabase.app', 'asia-southeast1.firebasedatabase.app'];
 let dbCache = '';
 async function resolveDb(v) {
@@ -68,9 +50,9 @@ async function resolveDb(v) {
   for (const h of HOSTS) {
     const u = `https://${v}.${h}`;
     try {
-      const r = await fetch(`${u}/keys/PROBE.json`); // readable under the rules; 401 still proves the host
+      const r = await fetch(`${u}/keys/PROBE.json`);
       if (r.ok || r.status === 401) { dbCache = u; return u; }
-    } catch (_) { /* next region */ }
+    } catch (_) {}
   }
   return '';
 }

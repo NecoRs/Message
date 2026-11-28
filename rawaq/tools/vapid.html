@@ -4,9 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>مفاتيح تنبيهات رواق</title>
-  <style>
-    :root { --bg: #fff; --fg: #0b0b0b; --muted: #777; --line: #e6e6e6; --soft: #f6f6f6; color-scheme: light dark; }
+  <title>مفاتيح تنبيهات همس</title>
+  <style>    :root { --bg: #fff; --fg: #0b0b0b; --muted: #777; --line: #e6e6e6; --soft: #f6f6f6; color-scheme: light dark; }
     @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0a; --fg: #f3f3f3; --muted: #8a8a8a; --line: #262626; --soft: #151515; } }
     body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
     main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
@@ -20,11 +19,12 @@
     .copy { margin-top: 8px; padding: 8px 14px; font-size: 14px; background: var(--soft); color: var(--fg); border: 1px solid var(--line); }
     .warn { color: #b91c1c; font-weight: 600; }
     @media (prefers-color-scheme: dark) { .warn { color: #f87171; } }
-  </style>
+  
+</style>
 </head>
 <body>
   <main>
-    <h1>مفاتيح تنبيهات رواق (VAPID)</h1>
+    <h1>مفاتيح تنبيهات همس (VAPID)</h1>
     <p>المفاتيح تتولّد هنا داخل متصفحك، وما تنرسل لأي مكان. ولّدها مرة وحدة بس.</p>
     <button type="button" id="gen">ولّد المفاتيح</button>
     <div id="out" hidden>
@@ -60,6 +60,7 @@
       e.target.textContent = 'تم النسخ ✓';
       setTimeout(() => { e.target.textContent = 'نسخ'; }, 1500);
     });
-  </script>
+  
+</script>
 </body>
 </html>

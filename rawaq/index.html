@@ -241,8 +241,11 @@
               <span class="who-line"><b id="c-name" dir="auto"></b><span class="vslot" id="c-badge"></span><span class="shield-slot" id="c-shield" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shield"/></svg></span></span>
               <span class="status" id="c-status"></span>
             </div>
-            <button class="icon-btn ghost" id="btn-find" type="button" aria-label="ابحث في المحادثة">
-              <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+            <button class="icon-btn ghost" id="btn-video" type="button" aria-label="مكالمة فيديو">
+              <svg class="i" viewBox="0 0 24 24"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="m15.5 10.5 5-3v9l-5-3"/></svg>
+            </button>
+            <button class="icon-btn ghost" id="btn-voice" type="button" aria-label="مكالمة صوتية">
+              <svg class="i" viewBox="0 0 24 24"><path d="M5 4h3.5l1.8 4.6-2.4 1.6a11 11 0 0 0 5.9 5.9l1.6-2.4L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4Z"/></svg>
             </button>
             <button class="icon-btn ghost" id="btn-chat-menu" type="button" aria-label="خيارات المحادثة">
               <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg>
@@ -324,6 +327,17 @@
               <button class="send" id="send" type="submit" aria-label="إرسال" disabled>
                 <svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
               </button>
+              <button class="send mic" id="btn-mic" type="button" aria-label="تسجيل رسالة صوتية (اضغط مطوّلاً)">
+                <svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+              </button>
+              <div class="rec-bar" id="rec-bar" hidden>
+                <button class="rec-x" id="rec-cancel" type="button" aria-label="إلغاء التسجيل"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span class="rec-time" id="rec-time">0:00</span>
+                <span class="rec-wave" id="rec-wave" aria-hidden="true"></span>
+                <span class="rec-hint">اسحب للإلغاء ‹</span>
+                <button class="send rec-send" id="rec-send" type="button" aria-label="إرسال الرسالة الصوتية"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button>
+              </div>
             </div>
           </form>
           <div class="blocked-bar" id="blocked-bar" hidden>
@@ -514,6 +528,10 @@
           <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </div>
+      <button class="row-btn" id="btn-find" type="button">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+        <span>ابحث في المحادثة</span>
+      </button>
       <button class="row-btn" id="btn-copy-peer" type="button">
         <svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h2"/></svg>
         <span>نسخ معرّفه</span>
@@ -714,6 +732,28 @@
       </div>
       <ul class="star-list" id="star-list"></ul>
       <p class="muted star-empty" id="star-empty">ما فيه رسائل مميّزة. اضغط مطوّلاً على أي رسالة واختر «تمييز».</p>
+    </div>
+  </div>
+
+  <div class="call" id="call" role="dialog" aria-modal="true" aria-labelledby="call-name" hidden>
+    <video class="call-remote" id="call-remote" autoplay playsinline muted></video>
+    <audio id="call-audio" autoplay muted></audio>
+    <div class="call-top">
+      <span class="avatar xl call-avatar" id="call-avatar"></span>
+      <b class="call-name" id="call-name" dir="auto"></b>
+      <span class="call-state" id="call-state"></span>
+      <span class="call-secure"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>مشفّرة بين الطرفين</span></span>
+    </div>
+    <video class="call-local" id="call-local" autoplay playsinline muted hidden></video>
+    <div class="call-actions" id="call-actions">
+      <button class="call-btn" id="call-mute" type="button" aria-label="كتم المايك" aria-pressed="false"><svg class="i on-i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><svg class="i off-i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16"/></svg></button>
+      <button class="call-btn" id="call-cam" type="button" aria-label="إيقاف الكاميرا" aria-pressed="false"><svg class="i on-i" viewBox="0 0 24 24"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="m15.5 10.5 5-3v9l-5-3"/></svg><svg class="i off-i" viewBox="0 0 24 24"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="m15.5 10.5 5-3v9l-5-3M3 4l17 17"/></svg></button>
+      <button class="call-btn" id="call-flip" type="button" aria-label="تبديل الكاميرا" hidden><svg class="i" viewBox="0 0 24 24"><path d="M4 10a8 8 0 0 1 14-4l2 2M20 14a8 8 0 0 1-14 4l-2-2"/><path d="M20 4v4h-4M4 20v-4h4"/></svg></button>
+      <button class="call-btn end" id="call-end" type="button" aria-label="إنهاء المكالمة"><svg class="i" viewBox="0 0 24 24"><path d="M3 13.5c4.9-4.7 13.1-4.7 18 0l-2.2 2.6-3.6-1.4v-2.6a10 10 0 0 0-6.4 0v2.6l-3.6 1.4Z"/></svg></button>
+    </div>
+    <div class="call-incoming" id="call-incoming" hidden>
+      <button class="call-btn end big" id="call-decline" type="button" aria-label="رفض"><svg class="i" viewBox="0 0 24 24"><path d="M3 13.5c4.9-4.7 13.1-4.7 18 0l-2.2 2.6-3.6-1.4v-2.6a10 10 0 0 0-6.4 0v2.6l-3.6 1.4Z"/></svg></button>
+      <button class="call-btn accept big" id="call-accept" type="button" aria-label="رد"><svg class="i" viewBox="0 0 24 24"><path d="M5 4h3.5l1.8 4.6-2.4 1.6a11 11 0 0 0 5.9 5.9l1.6-2.4L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4Z"/></svg></button>
     </div>
   </div>
 

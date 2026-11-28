@@ -63,6 +63,8 @@
     pin: '<path d="M9 4h6l-1 5 3.5 3.5v1.5h-11v-1.5L10 9Z"/><path d="M12 14v6"/>',
     star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    phone: '<path d="M5 4h3.5l1.8 4.6-2.4 1.6a11 11 0 0 0 5.9 5.9l1.6-2.4L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4Z"/>',
+    video: '<rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="m15.5 10.5 5-3v9l-5-3"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   };
   const REACTS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
@@ -273,6 +275,7 @@
       scheduleReconnect();
     });
     p.on('error', (err) => onPeerError(p, err));
+    p.on('call', (mc) => { if (peer === p) onIncomingMedia(mc); else { try { mc.close(); } catch (_) {} } });
   }
 
   function netStop() {
@@ -901,6 +904,9 @@
       case 'typing': setTyping(id, !!d.on); break;
       case 'react': onReact(id, d); break;
       case 'edit': onEdit(id, d); break;
+      case 'call': case 'call-ok': case 'call-no': case 'call-end': case 'call-fp': case 'call-st':
+        if (sentAt === undefined) onCallSignal(id, d);
+        break;
       case 'pin': onPin(id, d); break;
       case 'unsend': onUnsend(id, d); break;
       case 'unsent': case 'unsend-no': onUnsendReply(id, d); break;
@@ -1335,6 +1341,7 @@
     if (!id) return;
     closeProfile(true);
     stopTyping(id);
+    if (rec) stopRecording(false);
     if (S.editing) cancelEdit();
     else S.drafts[id] = input.value;
     cancelReply();
@@ -1561,6 +1568,7 @@
   }
 
   function bubbleFor(m, cont) {
+    if (m.sys === 'call') return callRow(m);
     const row = el('div', 'msg ' + (m.me ? 'me' : 'them') + (cont ? ' cont' : ''));
     row.dataset.id = m.id;
     if (!m.media && isJumbo(m.text)) row.classList.add('jumbo');
@@ -1581,7 +1589,9 @@
     }
     if (m.media) {
       b.classList.add('has-media');
-      if (!m.text) b.classList.add('media-only');
+      const card = m.media.kind === 'audio' || m.media.kind === 'file';
+      if (!m.text) b.classList.add(card ? 'card-only' : 'media-only');
+      if (card) b.classList.add('has-card');
       b.appendChild(mediaNode(m));
     }
     if (m.text || !m.media) {
@@ -1712,7 +1722,9 @@
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
   }
   function updateSend() {
-    $('#send').disabled = !input.value.trim();
+    const has = !!input.value.trim();
+    $('#send').disabled = !has;
+    $('.composer-box').classList.toggle('typing-text', has || !!S.editing || !cloudReady() || !window.MediaRecorder);
   }
 
   let typingAt = 0;
@@ -2208,7 +2220,7 @@
 
   let ctxHold = false;
   function openCtx(m, row, byTouch) {
-    if (!S.active) return;
+    if (!S.active || !m || m.sys) return;
     closeCtx(true);
     ctxHold = !!byTouch;
     holdUntil = 0;
@@ -2323,6 +2335,8 @@
     }
     const q = e.target.closest('.quote');
     if (q) { jumpTo(q.dataset.ref); return; }
+    const recall = e.target.closest('[data-recall]');
+    if (recall) { startCall(recall.dataset.recall === 'video'); return; }
     const vp = e.target.closest('[data-voice-play]');
     if (vp) { const m = msgOfRow(vp.closest('.msg')); if (m) toggleVoice(m); return; }
     if (e.target.closest('[data-voice-speed]')) { cycleSpeed(); return; }
@@ -2584,6 +2598,7 @@
   };
 
   function mediaLabel(m) {
+    if (m.sys === 'call') return (m.call && m.call.v ? '📹 ' : '📞 ') + callLabel(m);
     if (!m.media) return m.text;
     const md = m.media;
     const label = md.kind === 'video' ? '🎥 فيديو'
@@ -3583,6 +3598,526 @@
     });
   }
 
+  let rec = null;
+  const REC_MAX = 15 * 60;
+  function recMime() {
+    if (!window.MediaRecorder) return null;
+    for (const t of ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus']) {
+      try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (_) {}
+    }
+    return '';
+  }
+  function showRecUI(on) {
+    const bar = $('#rec-bar');
+    bar.hidden = !on;
+    bar.classList.remove('locked');
+    bar.style.removeProperty('--dx');
+    $('.composer-box').classList.toggle('recording', on);
+    if (on) {
+      $('#rec-time').textContent = '0:00';
+      const w = $('#rec-wave');
+      if (!w.childElementCount) for (let i = 0; i < 36; i++) w.appendChild(el('i'));
+      $$('i', w).forEach((b) => b.style.setProperty('--h', '0'));
+    }
+  }
+  async function startRecording(held) {
+    if (rec || !S.active || isBlocked(S.active)) return;
+    if (!cloudReady()) { toast('رفع الملفات غير متاح', { icon: 'alert' }); return; }
+    if (call) { toast('ما تقدر تسجّل أثناء المكالمة', { icon: 'alert' }); return; }
+    const mime = recMime();
+    if (mime === null || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('المتصفح لا يدعم التسجيل', { icon: 'alert' }); return; }
+    const r = { chat: S.active, held, starting: true, levels: [], chunks: [] };
+    rec = r;
+    showRecUI(true);
+    if (!held) $('#rec-bar').classList.add('locked');
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (_) {
+      if (rec === r) { rec = null; showRecUI(false); }
+      toast('اسمح لهمس باستخدام المايك', { icon: 'alert' });
+      return;
+    }
+    if (rec !== r || r.cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+    let mr;
+    try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined); } catch (_) {
+      stream.getTracks().forEach((t) => t.stop());
+      rec = null;
+      showRecUI(false);
+      toast('تعذّر بدء التسجيل', { icon: 'alert' });
+      return;
+    }
+    r.stream = stream;
+    r.mr = mr;
+    r.mime = mr.mimeType || mime || 'audio/webm';
+    r.starting = false;
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) r.chunks.push(e.data); };
+    mr.onstop = () => finishRecording(r);
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      r.ac = new AC();
+      r.an = r.ac.createAnalyser();
+      r.an.fftSize = 512;
+      r.ac.createMediaStreamSource(stream).connect(r.an);
+      r.buf = new Uint8Array(r.an.fftSize);
+    } catch (_) {}
+    mr.start(250);
+    r.start = performance.now();
+    r.tick = setInterval(() => recTick(r), 100);
+    if (r.stopAsked !== undefined) stopRecording(r.stopAsked);
+  }
+  function recTick(r) {
+    let lvl = 0;
+    if (r.an) {
+      r.an.getByteTimeDomainData(r.buf);
+      let sum = 0;
+      for (let i = 0; i < r.buf.length; i++) { const v = (r.buf[i] - 128) / 128; sum += v * v; }
+      lvl = Math.min(1, Math.sqrt(sum / r.buf.length) * 3.2);
+    }
+    r.levels.push(lvl);
+    const sec = (performance.now() - r.start) / 1000;
+    $('#rec-time').textContent = fmtDur(sec);
+    const bars = $$('#rec-wave i');
+    const last = r.levels.slice(-bars.length);
+    bars.forEach((b, i) => b.style.setProperty('--h', String(last[i - (bars.length - last.length)] || 0)));
+    if (sec >= REC_MAX) stopRecording(true);
+  }
+  function stopRecording(send) {
+    const r = rec;
+    if (!r) return;
+    if (r.starting) { r.stopAsked = send; if (!send) { r.cancelled = true; rec = null; showRecUI(false); } return; }
+    r.send = send;
+    clearInterval(r.tick);
+    r.end = performance.now();
+    try { if (r.mr.state !== 'inactive') r.mr.stop(); else finishRecording(r); } catch (_) { finishRecording(r); }
+    r.stream.getTracks().forEach((t) => t.stop());
+    if (r.ac) r.ac.close().catch(() => {});
+    rec = null;
+    showRecUI(false);
+  }
+  function peaksFrom(levels, n) {
+    if (!levels.length) return '';
+    let max = 0.05;
+    for (const v of levels) if (v > max) max = v;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor((i * levels.length) / n);
+      const b = Math.max(a + 1, Math.floor(((i + 1) * levels.length) / n));
+      let m = 0;
+      for (let j = a; j < b && j < levels.length; j++) m = Math.max(m, levels[j]);
+      out.push(Math.max(1, Math.min(9, Math.round((m / max) * 9))));
+    }
+    return out.join('');
+  }
+  function finishRecording(r) {
+    if (r.done) return;
+    r.done = true;
+    if (!r.send) return;
+    const dur = ((r.end || performance.now()) - r.start) / 1000;
+    if (dur < 0.7 || !r.chunks.length) { toast('اضغط مطوّلاً للتسجيل', { icon: 'alert' }); return; }
+    const blob = new Blob(r.chunks, { type: r.mime });
+    sendMedia({ kind: 'audio', chat: r.chat, blob, mime: r.mime, dur, pk: peaksFrom(r.levels, 48), preview: URL.createObjectURL(blob) }, '');
+  }
+
+  let call = null;
+  const CALL_RING = 45000;
+  const fpsOf = (sdp) => [...String(sdp || '').matchAll(/a=fingerprint:(\S+) ([0-9A-Fa-f:]+)/g)].map((x) => (x[1] + ' ' + x[2]).toLowerCase()).sort().join('|');
+  let ringTimer = 0;
+  function ensureActx() {
+    try {
+      if (!actx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        actx = new AC();
+      }
+      if (actx.state === 'suspended') actx.resume();
+    } catch (_) {}
+    return actx;
+  }
+  function tone(notes) {
+    const a = ensureActx();
+    if (!a || a.state !== 'running') return;
+    const t = a.currentTime;
+    for (const [f, d, len, v] of notes) {
+      const o = a.createOscillator();
+      const g = a.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.exponentialRampToValueAtTime(v, t + d + 0.02);
+      g.gain.setValueAtTime(v, t + d + len - 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + len);
+      o.connect(g).connect(a.destination);
+      o.start(t + d);
+      o.stop(t + d + len + 0.02);
+    }
+  }
+  function ringtone(on) {
+    clearInterval(ringTimer);
+    ringTimer = 0;
+    if (!on) return;
+    const play = () => {
+      tone([[784, 0, 0.18, 0.12], [988, 0.2, 0.18, 0.12], [784, 0.6, 0.18, 0.12], [988, 0.8, 0.18, 0.12]]);
+      if (navigator.vibrate) { try { navigator.vibrate([250, 150, 250]); } catch (_) {} }
+    };
+    play();
+    ringTimer = setInterval(play, 2800);
+  }
+  function ringback(on) {
+    clearInterval(ringTimer);
+    ringTimer = 0;
+    if (!on) return;
+    const play = () => tone([[440, 0, 1.1, 0.05], [480, 0, 1.1, 0.04]]);
+    play();
+    ringTimer = setInterval(play, 3600);
+  }
+
+  function getMedia(video) {
+    return navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+    });
+  }
+  function setTracks(on) {
+    if (!call || !call.local) return;
+    for (const t of call.local.getAudioTracks()) t.enabled = on && !call.muted;
+    for (const t of call.local.getVideoTracks()) t.enabled = on && !call.camOff;
+  }
+  async function canFlip() {
+    try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput').length > 1; } catch (_) { return false; }
+  }
+
+  async function startCall(video) {
+    const id = S.active;
+    if (!id || isBlocked(id)) return;
+    if (call) { toast('أنت في مكالمة الحين', { icon: 'alert' }); return; }
+    if (keyChange.has(id)) { toast('تحقّق من رمز الأمان أولاً', { icon: 'alert' }); return; }
+    if (!isOpen(id)) { dial(id); toast('الطرف الثاني غير متصل الآن، جرّب بعد شوي', { icon: 'alert' }); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('المتصفح لا يدعم المكالمات', { icon: 'alert' }); return; }
+    if (rec) stopRecording(false);
+    stopVoice();
+    ensureActx();
+    let local;
+    try { local = await getMedia(video); } catch (_) {
+      toast(video ? 'اسمح لهمس باستخدام الكاميرا والمايك' : 'اسمح لهمس باستخدام المايك', { icon: 'alert' });
+      return;
+    }
+    if (call || !isOpen(id)) { local.getTracks().forEach((t) => t.stop()); if (!call) toast('انقطع الاتصال بالطرف الثاني', { icon: 'alert' }); return; }
+    call = { id, cid: rand(16, ALPHABET), video, dir: 'out', state: 'ringing', local, muted: false, camOff: false, facing: 'user' };
+    call.canFlip = video && await canFlip();
+    setTracks(false);
+    sendTo(id, { t: 'call', cid: call.cid, video: !!video });
+    const cur = call;
+    cur.timer = setTimeout(() => { if (call === cur && cur.state === 'ringing') endCall('noanswer', true); }, CALL_RING);
+    showCall();
+    ringback(true);
+  }
+
+  function onCallSignal(id, d) {
+    const mine = call && call.id === id && call.cid === d.cid;
+    switch (d.t) {
+      case 'call': incomingCall(id, d); break;
+      case 'call-ok': if (mine && call.dir === 'out' && call.state === 'ringing') connectCall(); break;
+      case 'call-no': if (mine) endCall(d.busy ? 'busy' : 'declined', false); break;
+      case 'call-end': if (mine) endCall('ended', false); break;
+      case 'call-fp': if (mine && typeof d.fp === 'string') { call.theirFp = d.fp.slice(0, 2000); verifyCall(); } break;
+      case 'call-st': if (mine) { call.remoteCam = d.cam !== false; renderCall(); } break;
+      default: break;
+    }
+  }
+
+  function incomingCall(id, d) {
+    if (typeof d.cid !== 'string' || !/^[A-Z2-9]{16}$/.test(d.cid)) return;
+    if (call) {
+      if (call.id === id && call.dir === 'out' && call.state === 'ringing' && S.me.id > id) {
+        const mine = call;
+        call = null;
+        clearTimeout(mine.timer);
+        ringback(false);
+        if (mine.local) mine.local.getTracks().forEach((t) => t.stop());
+      } else if (call.id === id && call.dir === 'out' && call.state === 'ringing') {
+        return;
+      } else {
+        sendTo(id, { t: 'call-no', cid: d.cid, busy: 1 });
+        addCallMsg(id, { video: !!d.video, dir: 'in', missed: true });
+        return;
+      }
+    }
+    ensureContact(id);
+    call = { id, cid: d.cid, video: !!d.video, dir: 'in', state: 'incoming', muted: false, camOff: false, facing: 'user' };
+    const cur = call;
+    cur.timer = setTimeout(() => {
+      if (call !== cur || cur.state !== 'incoming') return;
+      sendTo(id, { t: 'call-no', cid: cur.cid });
+      endCall('missed', false);
+    }, CALL_RING);
+    showCall();
+    ringtone(true);
+    if (document.visibilityState !== 'visible') notify(S.contacts[id], d.video ? 'مكالمة فيديو واردة' : 'مكالمة صوتية واردة');
+  }
+
+  async function acceptCall() {
+    const cur = call;
+    if (!cur || cur.state !== 'incoming') return;
+    ringtone(false);
+    clearTimeout(cur.timer);
+    cur.state = 'connecting';
+    renderCall();
+    try { cur.local = await getMedia(cur.video); } catch (_) {
+      if (call !== cur) return;
+      sendTo(cur.id, { t: 'call-no', cid: cur.cid });
+      endCall('nomedia', false);
+      toast(cur.video ? 'اسمح لهمس باستخدام الكاميرا والمايك' : 'اسمح لهمس باستخدام المايك', { icon: 'alert' });
+      return;
+    }
+    if (call !== cur) { cur.local.getTracks().forEach((t) => t.stop()); return; }
+    cur.canFlip = cur.video && await canFlip();
+    setTracks(false);
+    attachLocal();
+    renderCall();
+    cur.timer = setTimeout(() => { if (call === cur && cur.state !== 'active') endCall('failed', true); }, 30000);
+    sendTo(cur.id, { t: 'call-ok', cid: cur.cid });
+  }
+
+  function declineCall() {
+    if (!call || call.state !== 'incoming') return;
+    sendTo(call.id, { t: 'call-no', cid: call.cid });
+    endCall('declined-me', false);
+  }
+
+  function connectCall() {
+    const cur = call;
+    clearTimeout(cur.timer);
+    ringback(false);
+    cur.state = 'connecting';
+    renderCall();
+    let mc = null;
+    try { mc = peer && peer.call(CFG.prefix + cur.id, cur.local, { metadata: { cid: cur.cid } }); } catch (_) { mc = null; }
+    if (!mc) { endCall('failed', true); return; }
+    wireMc(mc);
+    cur.timer = setTimeout(() => { if (call === cur && cur.state !== 'active') endCall('failed', true); }, 30000);
+  }
+
+  function onIncomingMedia(mc) {
+    const id = idFromPeer(mc.peer);
+    const cid = mc.metadata && mc.metadata.cid;
+    if (!call || call.id !== id || call.dir !== 'in' || call.state !== 'connecting' || cid !== call.cid || call.mc || !call.local) {
+      try { mc.close(); } catch (_) {}
+      return;
+    }
+    wireMc(mc);
+    mc.answer(call.local);
+  }
+
+  function wireMc(mc) {
+    const cur = call;
+    cur.mc = mc;
+    mc.on('stream', (remote) => {
+      if (call !== cur || cur.remote) return;
+      cur.remote = remote;
+      attachRemote();
+      sendFp();
+    });
+    mc.on('close', () => { if (call === cur) endCall('ended', true); });
+    mc.on('error', () => { if (call === cur) endCall('failed', true); });
+    const pc = mc.peerConnection;
+    if (pc) pc.addEventListener('connectionstatechange', () => { if (call === cur && pc.connectionState === 'failed') endCall('failed', true); });
+  }
+
+  function sendFp() {
+    const cur = call;
+    if (!cur || cur.fpSent) return;
+    const pc = cur.mc && cur.mc.peerConnection;
+    const fp = pc && pc.localDescription ? fpsOf(pc.localDescription.sdp) : '';
+    if (!fp) { setTimeout(() => { if (call === cur) sendFp(); }, 200); return; }
+    cur.fpSent = true;
+    sendTo(cur.id, { t: 'call-fp', cid: cur.cid, fp });
+    verifyCall();
+  }
+
+  function verifyCall() {
+    const cur = call;
+    if (!cur || !cur.theirFp || !cur.fpSent || cur.state === 'active') return;
+    const pc = cur.mc && cur.mc.peerConnection;
+    const remoteFp = pc && pc.remoteDescription ? fpsOf(pc.remoteDescription.sdp) : '';
+    if (!remoteFp) { setTimeout(() => { if (call === cur) verifyCall(); }, 200); return; }
+    if (remoteFp !== cur.theirFp) {
+      toast('أوقفنا المكالمة: ما قدرنا نتأكد إنها مشفّرة بينكم مباشرة', { icon: 'alert', ms: 6000 });
+      endCall('insecure', true);
+      return;
+    }
+    clearTimeout(cur.timer);
+    cur.state = 'active';
+    cur.startAt = Date.now();
+    setTracks(true);
+    $('#call-remote').muted = false;
+    $('#call-audio').muted = false;
+    cur.tick = setInterval(renderCallTime, 1000);
+    renderCall();
+    if (cur.video && cur.camOff) sendTo(cur.id, { t: 'call-st', cid: cur.cid, cam: false });
+  }
+
+  function endCall(why, tell) {
+    const cur = call;
+    if (!cur) return;
+    call = null;
+    clearTimeout(cur.timer);
+    clearInterval(cur.tick);
+    ringtone(false);
+    if (tell && isOpen(cur.id)) sendTo(cur.id, { t: 'call-end', cid: cur.cid });
+    if (cur.mc) { try { cur.mc.close(); } catch (_) {} }
+    if (cur.local) cur.local.getTracks().forEach((t) => t.stop());
+    const dur = cur.startAt ? Math.round((Date.now() - cur.startAt) / 1000) : 0;
+    const missed = !cur.startAt && cur.dir === 'in' && (why === 'missed' || why === 'ended');
+    const reason = why === 'ended' && !cur.startAt && cur.dir === 'out' ? 'cancel' : why;
+    addCallMsg(cur.id, { video: cur.video, dir: cur.dir, dur, answered: !!cur.startAt, missed, why: reason });
+    hideCall(cur, why);
+  }
+
+  function callLabel(m) {
+    const k = m.call || {};
+    const kind = k.v ? 'مكالمة فيديو' : 'مكالمة صوتية';
+    if (k.x) return kind + ' فائتة';
+    if (k.d || k.a) return kind + ' · ' + fmtDur(k.d);
+    const why = { declined: 'رفضها', 'declined-me': 'رفضتها', busy: 'الخط مشغول', noanswer: 'ما رد', insecure: 'أُوقفت لسبب أمني', failed: 'تعذّر الاتصال', nomedia: 'بدون مايك', cancel: 'أُلغيت' }[k.w] || 'لم تكتمل';
+    return kind + ' · ' + why;
+  }
+
+  function addCallMsg(id, info) {
+    const c = ensureContact(id);
+    const m = { id: msgId(), me: info.dir === 'out', ts: Date.now(), text: '', sys: 'call', st: 'read', seen: true, rr: true, call: { v: info.video ? 1 : 0, d: info.dur || 0, a: info.answered ? 1 : 0, x: info.missed ? 1 : 0, w: info.why || '' } };
+    if (info.missed && !isViewing(id)) {
+      c.unread = (c.unread || 0) + 1;
+      notify(c, callLabel(m));
+    }
+    const list = msgsOf(id);
+    list.push(m);
+    trim(list);
+    saveMsgs(id);
+    c.last = { text: (m.call.v ? '📹 ' : '📞 ') + callLabel(m), me: m.me, ts: m.ts };
+    c.updated = Date.now();
+    saveContacts();
+    if (S.active === id) appendMessage(m);
+    renderList();
+    updateTitle();
+  }
+
+  function callRow(m) {
+    const row = el('div', 'msg sys-row' + (m.call && m.call.x ? ' missed' : ''));
+    row.dataset.id = m.id;
+    const pill = el('button', 'call-pill');
+    pill.type = 'button';
+    pill.dataset.recall = m.call && m.call.v ? 'video' : 'voice';
+    pill.setAttribute('aria-label', callLabel(m) + '، اضغط للاتصال');
+    pill.innerHTML = svg(m.call && m.call.v ? 'video' : 'phone');
+    pill.appendChild(el('span', null, (m.me ? '↗ ' : '↙ ') + callLabel(m)));
+    pill.appendChild(el('time', null, fTime.format(m.ts)));
+    row.appendChild(pill);
+    return row;
+  }
+
+  const callEl = $('#call');
+  function showCall() {
+    callEl.hidden = false;
+    callEl.classList.remove('ending');
+    callEl.classList.toggle('video', !!call.video);
+    renderCall();
+    attachLocal();
+    void callEl.offsetWidth;
+    callEl.classList.add('open');
+  }
+  function hideCall(cur, why) {
+    $('#call-state').textContent = why === 'insecure' ? 'أُوقفت لسبب أمني' : why === 'busy' ? 'الخط مشغول' : why === 'declined' ? 'رفض المكالمة' : 'انتهت المكالمة';
+    callEl.classList.add('ending');
+    $('#call-incoming').hidden = true;
+    $('#call-actions').hidden = true;
+    setTimeout(() => {
+      if (call) return;
+      callEl.classList.remove('open');
+      setTimeout(() => {
+        if (call) return;
+        callEl.hidden = true;
+        for (const v of [$('#call-remote'), $('#call-local'), $('#call-audio')]) { v.srcObject = null; }
+      }, 420);
+    }, 1100);
+  }
+  function renderCall() {
+    if (!call) return;
+    const c = S.contacts[call.id];
+    setAvatar($('#call-avatar'), c);
+    $('#call-name').textContent = nameOf(c);
+    const st = {
+      ringing: 'يرنّ…',
+      incoming: call.video ? 'مكالمة فيديو واردة' : 'مكالمة صوتية واردة',
+      connecting: 'جارٍ الاتصال الآمن…',
+      active: fmtDur((Date.now() - (call.startAt || Date.now())) / 1000),
+    }[call.state];
+    $('#call-state').textContent = st || '';
+    callEl.dataset.state = call.state;
+    callEl.classList.toggle('remote-on', !!(call.video && call.state === 'active' && call.remoteCam !== false));
+    const mute = $('#call-mute');
+    mute.classList.toggle('off', !!call.muted);
+    mute.setAttribute('aria-pressed', String(!!call.muted));
+    const cam = $('#call-cam');
+    cam.hidden = !call.video;
+    cam.classList.toggle('off', !!call.camOff);
+    cam.setAttribute('aria-pressed', String(!!call.camOff));
+    $('#call-flip').hidden = !call.video || !call.canFlip;
+    $('#call-incoming').hidden = call.state !== 'incoming';
+    $('#call-actions').hidden = call.state === 'incoming';
+    $('#call-accept').innerHTML = svg(call.video ? 'video' : 'phone');
+  }
+  function renderCallTime() {
+    if (call && call.state === 'active') $('#call-state').textContent = fmtDur((Date.now() - call.startAt) / 1000);
+  }
+  function attachLocal() {
+    const v = $('#call-local');
+    if (call && call.video && call.local) { v.srcObject = call.local; v.hidden = false; v.play().catch(() => {}); } else { v.srcObject = null; v.hidden = true; }
+  }
+  function attachRemote() {
+    if (!call || !call.remote) return;
+    const target = call.video ? $('#call-remote') : $('#call-audio');
+    target.muted = true;
+    target.srcObject = call.remote;
+    target.play().catch(() => {});
+  }
+  function toggleMute() {
+    if (!call) return;
+    call.muted = !call.muted;
+    setTracks(call.state === 'active');
+    renderCall();
+  }
+  function toggleCam() {
+    if (!call || !call.video) return;
+    call.camOff = !call.camOff;
+    setTracks(call.state === 'active');
+    if (call.state === 'active') sendTo(call.id, { t: 'call-st', cid: call.cid, cam: !call.camOff });
+    renderCall();
+  }
+  async function flipCam() {
+    const cur = call;
+    if (!cur || !cur.video || !cur.local) return;
+    const facing = cur.facing === 'user' ? 'environment' : 'user';
+    let s = null;
+    try { s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: facing } } }); } catch (_) {
+      try { s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } }); } catch (e) { toast('تعذّر تبديل الكاميرا', { icon: 'alert' }); return; }
+    }
+    const nt = s.getVideoTracks()[0];
+    if (!nt || call !== cur) { s.getTracks().forEach((t) => t.stop()); return; }
+    const old = cur.local.getVideoTracks()[0];
+    const pc = cur.mc && cur.mc.peerConnection;
+    const sender = pc && pc.getSenders().find((x) => x.track && x.track.kind === 'video');
+    try { if (sender) await sender.replaceTrack(nt); } catch (_) {}
+    if (old) { cur.local.removeTrack(old); old.stop(); }
+    cur.local.addTrack(nt);
+    nt.enabled = cur.state === 'active' && !cur.camOff;
+    cur.facing = facing;
+    attachLocal();
+  }
+  linkHooks.lost.push((id) => {
+    if (call && call.id === id && (call.state === 'ringing' || call.state === 'incoming')) endCall('failed', false);
+  });
+
   function applyTheme() {
     document.documentElement.dataset.theme = 'dark';
     const meta = $('meta[name="theme-color"]');
@@ -3728,7 +4263,42 @@
     });
 
     $('#banner-act').addEventListener('click', () => { if (S.active) openSafety(S.active); });
-    $('#btn-find').addEventListener('click', () => { if (S.find) closeFind(); else openFind(); });
+    $('#btn-find').addEventListener('click', () => { closeModal(true); openFind(); });
+    $('#btn-voice').addEventListener('click', () => startCall(false));
+    $('#btn-video').addEventListener('click', () => startCall(true));
+    $('#call-accept').addEventListener('click', acceptCall);
+    $('#call-decline').addEventListener('click', declineCall);
+    $('#call-end').addEventListener('click', () => { if (call) endCall(call.state === 'active' ? 'ended' : 'cancel', true); });
+    $('#call-mute').addEventListener('click', toggleMute);
+    $('#call-cam').addEventListener('click', toggleCam);
+    $('#call-flip').addEventListener('click', flipCam);
+    const mic = $('#btn-mic');
+    let micDown = null;
+    mic.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || rec) return;
+      e.preventDefault();
+      micDown = { x: e.clientX, t: Date.now() };
+      try { mic.setPointerCapture(e.pointerId); } catch (_) {}
+      startRecording(true);
+    });
+    mic.addEventListener('pointermove', (e) => {
+      if (!micDown || !rec) return;
+      const dx = Math.abs(e.clientX - micDown.x);
+      $('#rec-bar').style.setProperty('--dx', Math.min(120, dx) + 'px');
+      if (dx > 110) { micDown = null; stopRecording(false); toast('تم إلغاء التسجيل', { icon: 'trash' }); }
+    });
+    mic.addEventListener('pointerup', () => {
+      if (!micDown) return;
+      const quick = Date.now() - micDown.t < 450;
+      micDown = null;
+      if (!rec) return;
+      if (quick) { rec.held = false; $('#rec-bar').classList.add('locked'); return; }
+      stopRecording(true);
+    });
+    mic.addEventListener('pointercancel', () => { if (micDown) { micDown = null; stopRecording(false); } });
+    mic.addEventListener('click', (e) => { if (e.detail === 0 && !rec) startRecording(false); });
+    $('#rec-cancel').addEventListener('click', () => stopRecording(false));
+    $('#rec-send').addEventListener('click', () => stopRecording(true));
     $('#find-q').addEventListener('input', () => runFind(false));
     $('#find-q').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? 1 : -1); }
@@ -4039,6 +4609,7 @@
       }
     });
     window.addEventListener('pagehide', () => {
+      if (call) endCall('ended', true);
       flushSave();
       for (const set of conns.values()) for (const c of set) if (c._ready) send(c, { t: 'bye' });
       if (peer) { try { peer.destroy(); } catch (_) {} }

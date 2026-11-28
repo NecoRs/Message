@@ -67,6 +67,8 @@ try {
   await until(async () => (await lastThem(C).textContent()).includes('ستة'), 20000, 'C gets forward');
   assert((await lastThem(C).locator('.fw-label').count()) === 1, 'forwarded message is labelled');
 
+  await A.page.click('#btn-chat-menu');
+  await A.page.waitForSelector('#m-chat.open');
   await A.page.click('#btn-find');
   await A.page.fill('#find-q', 'ستة');
   await until(async () => (await A.page.textContent('#find-n')) === '1/1', 5000, 'find count');
